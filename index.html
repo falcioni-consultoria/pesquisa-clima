@@ -16,7 +16,7 @@
   <div class="topbar-left">
     <button id="btn-voltar" class="btn-icon" title="Voltar" hidden>←</button>
     <div class="topbar-brand">
-      <div class="logo-placeholder" id="logo-placeholder">🏢</div>
+      <div class="logo-placeholder" id="logo-placeholder"><img src="icons/falcioni-mark.png" alt="Falcioni"></div>
       <div>
         <div class="topbar-title" id="topbar-title">Falclima</div>
         <div class="topbar-subtitle" id="topbar-subtitle">Falcioni Consultoria</div>
@@ -58,13 +58,27 @@
       </label>
 
       <div class="campo">
-        <span>Logo do cliente</span>
-        <div class="logo-espaco">Espaço reservado para a logo do cliente (adicionar depois)</div>
+        <span>Logo do cliente (opcional)</span>
+        <div class="logo-upload">
+          <div class="logo-upload-preview" id="logo-upload-preview">🏢</div>
+          <div class="logo-upload-botoes">
+            <label class="btn btn-secundario btn-pequeno logo-upload-label">
+              Escolher imagem
+              <input type="file" id="input-logo" accept="image/*" hidden>
+            </label>
+            <button type="button" id="btn-remover-logo" class="btn-link hidden">Remover</button>
+          </div>
+        </div>
       </div>
 
       <label class="campo">
         <span>Setores / segmentos para o relatório (separados por vírgula, opcional)</span>
         <input type="text" id="input-segmentos" placeholder="Ex: Administrativo, Vendas, Operação">
+      </label>
+
+      <label class="campo">
+        <span>Link do Google Forms deste cliente (opcional)</span>
+        <input type="url" id="input-forms" placeholder="https://forms.gle/...">
       </label>
     </div>
 
@@ -140,6 +154,7 @@
       </div>
 
       <div class="coleta-acoes">
+        <button id="btn-anterior-pergunta" class="btn btn-secundario" title="Voltar para adicionar algo na resposta anterior">← Anterior</button>
         <button id="btn-pular-pergunta" class="btn btn-secundario">Pular</button>
         <button id="btn-confirmar-pergunta" class="btn btn-primario">Confirmar e próxima →</button>
       </div>
@@ -151,7 +166,11 @@
   <section id="tela-relatorio" class="tela hidden">
     <div class="tela-header">
       <h1 id="relatorio-titulo">Relatório</h1>
-      <button id="btn-imprimir" class="btn btn-secundario no-print">Imprimir / Salvar PDF</button>
+      <div class="tela-header-acoes no-print">
+        <a id="link-forms" class="btn btn-secundario hidden" href="#" target="_blank" rel="noopener">Abrir Google Forms ↗</a>
+        <button id="btn-baixar-ppt" class="btn btn-secundario">Baixar PPT</button>
+        <button id="btn-imprimir" class="btn btn-secundario">Imprimir / Salvar PDF</button>
+      </div>
     </div>
 
     <div class="relatorio-resumo card no-print">

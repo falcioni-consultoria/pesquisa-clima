@@ -42,6 +42,38 @@ function formatarNumero(n, casas = 1) {
   return n.toFixed(casas).replace('.', ',');
 }
 
+function atualizarLogoTopbar(logoUrl) {
+  $('logo-placeholder').innerHTML = `<img src="${logoUrl || 'icons/falcioni-mark.png'}" alt="Logo">`;
+}
+
+function redimensionarImagem(file, maxLado = 300) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Falha ao ler arquivo'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Arquivo inválido'));
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxLado || height > maxLado) {
+          const escala = maxLado / Math.max(width, height);
+          width = Math.round(width * escala);
+          height = Math.round(height * escala);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.82));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 // ---------- router ----------
 window.addEventListener('hashchange', rotear);
 window.addEventListener('DOMContentLoaded', () => {
@@ -71,6 +103,7 @@ $('btn-nova-pesquisa').addEventListener('click', () => { location.hash = '#/nova
 async function telaLista() {
   $('topbar-title').textContent = 'Falclima';
   $('topbar-subtitle').textContent = 'Falcioni Consultoria';
+  atualizarLogoTopbar(null);
   mostrarTela('tela-lista');
   const cont = $('lista-pesquisas');
   cont.innerHTML = '<p class="texto-vazio">Carregando...</p>';
@@ -109,17 +142,42 @@ function escapeHtml(str) {
 
 // ---------- tela: nova pesquisa ----------
 let perguntasEdit = [];
+let logoDataUrl = null;
 
 function telaNova() {
   $('topbar-title').textContent = 'Nova pesquisa';
   $('topbar-subtitle').textContent = 'Falcioni Consultoria';
+  atualizarLogoTopbar(null);
   mostrarTela('tela-nova');
   $('input-cliente').value = '';
   $('input-segmentos').value = SEGMENTOS_PADRAO.join(', ');
+  $('input-forms').value = '';
+  logoDataUrl = null;
+  $('logo-upload-preview').innerHTML = '🏢';
+  $('btn-remover-logo').classList.add('hidden');
   perguntasEdit = montarModelo('nota10');
   document.querySelectorAll('.modelo-opcao').forEach((b) => b.classList.toggle('selecionada', b.dataset.modelo === 'nota10'));
   renderPerguntasEdit();
 }
+
+$('input-logo').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    logoDataUrl = await redimensionarImagem(file, 300);
+    $('logo-upload-preview').innerHTML = `<img src="${logoDataUrl}" alt="Logo">`;
+    $('btn-remover-logo').classList.remove('hidden');
+  } catch (err) {
+    toast('Não foi possível carregar essa imagem.');
+  }
+});
+
+$('btn-remover-logo').addEventListener('click', () => {
+  logoDataUrl = null;
+  $('logo-upload-preview').innerHTML = '🏢';
+  $('btn-remover-logo').classList.add('hidden');
+});
 
 document.querySelectorAll('.modelo-opcao').forEach((btn) => {
   btn.addEventListener('click', () => {
@@ -177,6 +235,7 @@ $('btn-criar-pesquisa').addEventListener('click', async () => {
   const perguntasValidas = perguntasEdit.filter((p) => p.texto.trim());
   if (!perguntasValidas.length) { toast('Adicione ao menos uma pergunta.'); return; }
   const segmentos = $('input-segmentos').value.split(',').map((s) => s.trim()).filter(Boolean);
+  const formsUrl = $('input-forms').value.trim();
 
   const btn = $('btn-criar-pesquisa');
   btn.disabled = true; btn.textContent = 'Criando...';
@@ -186,6 +245,8 @@ $('btn-criar-pesquisa').addEventListener('click', async () => {
       status: 'aberta',
       perguntas: perguntasValidas,
       segmentos,
+      logo: logoDataUrl || null,
+      formsUrl: formsUrl || null,
       proximoSeq: 1,
       criadoEm: serverTimestamp(),
     });
@@ -208,6 +269,7 @@ const coleta = {
   reconhecedor: null,
   ouvindo: false,
   valorAtual: null,
+  respostasCache: {},
 };
 
 async function telaColeta(sessionId) {
@@ -225,6 +287,7 @@ async function telaColeta(sessionId) {
   coleta.session = snap.data();
   $('topbar-title').textContent = coleta.session.clienteNome;
   $('topbar-subtitle').textContent = 'Coletando respostas';
+  atualizarLogoTopbar(coleta.session.logo);
   coleta.seq = coleta.session.proximoSeq || 1;
   iniciarNovoRespondente();
 }
@@ -244,6 +307,7 @@ async function iniciarNovoRespondente() {
   pararEscuta();
   coleta.indicePergunta = 0;
   coleta.segmento = null;
+  coleta.respostasCache = {};
   $('coleta-respondente-label').textContent = `Respondente ${coleta.seq}`;
   const segmentos = coleta.session.segmentos || [];
 
@@ -307,6 +371,7 @@ function mostrarPergunta() {
   $('pergunta-texto').textContent = p.texto;
   $('progresso-fill').style.width = `${Math.round((coleta.indicePergunta / perguntas.length) * 100)}%`;
   $('transcricao-texto').value = '';
+  $('btn-anterior-pergunta').disabled = coleta.indicePergunta === 0;
 
   $('resposta-nota10').classList.add('hidden');
   $('resposta-likert').classList.add('hidden');
@@ -320,10 +385,25 @@ function mostrarPergunta() {
     renderRespostaLikert(p.tipo);
   }
 
+  const cache = coleta.respostasCache[p.id];
+  if (cache) {
+    $('transcricao-texto').value = cache.texto || '';
+    if (p.tipo !== 'aberta' && cache.valor !== undefined) selecionarValor(cache.valor);
+  }
+
   $('voz-nao-suportada').classList.toggle('hidden', reconhecimentoDisponivel());
   $('btn-mic').disabled = !reconhecimentoDisponivel();
   $('mic-status').textContent = 'Toque no microfone e deixe o cliente responder';
 }
+
+function voltarPergunta() {
+  if (coleta.indicePergunta <= 0) return;
+  pararEscuta();
+  coleta.indicePergunta--;
+  mostrarPergunta();
+}
+
+$('btn-anterior-pergunta').addEventListener('click', voltarPergunta);
 
 function renderRespostaNota10() {
   const cont = $('resposta-nota10');
@@ -406,9 +486,13 @@ async function avancarPergunta(pular) {
   try {
     if (!pular) {
       if (p.tipo === 'aberta') {
-        if (texto) await updateDoc(coleta.respondenteRef, { [`abertas.${p.id}`]: texto });
+        if (texto) {
+          await updateDoc(coleta.respondenteRef, { [`abertas.${p.id}`]: texto });
+          coleta.respostasCache[p.id] = { texto };
+        }
       } else if (coleta.valorAtual !== null) {
         await updateDoc(coleta.respondenteRef, { [`respostas.${p.id}`]: { valor: coleta.valorAtual, texto } });
+        coleta.respostasCache[p.id] = { valor: coleta.valorAtual, texto };
       }
     }
   } catch (e) {
@@ -455,6 +539,14 @@ async function telaRelatorio(sessionId) {
   $('topbar-title').textContent = relatorioSession.clienteNome;
   $('topbar-subtitle').textContent = 'Relatório em tempo real';
   $('relatorio-titulo').textContent = `Relatório — ${relatorioSession.clienteNome}`;
+  atualizarLogoTopbar(relatorioSession.logo);
+  const linkForms = $('link-forms');
+  if (relatorioSession.formsUrl) {
+    linkForms.href = relatorioSession.formsUrl;
+    linkForms.classList.remove('hidden');
+  } else {
+    linkForms.classList.add('hidden');
+  }
 
   const selFiltro = $('filtro-segmento');
   selFiltro.innerHTML = '<option value="">Todos</option>' +
@@ -470,6 +562,95 @@ async function telaRelatorio(sessionId) {
 }
 
 $('btn-imprimir').addEventListener('click', () => window.print());
+
+function carregarPptxGenJS() {
+  return new Promise((resolve, reject) => {
+    if (window.PptxGenJS) return resolve();
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js';
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('não foi possível carregar a biblioteca de PPT (verifique a internet)'));
+    document.head.appendChild(s);
+  });
+}
+
+$('btn-baixar-ppt').addEventListener('click', gerarPPT);
+
+async function gerarPPT() {
+  if (!relatorioSession) { toast('Aguarde o relatório carregar.'); return; }
+  const btn = $('btn-baixar-ppt');
+  const textoOriginal = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Gerando...';
+  try {
+    await carregarPptxGenJS();
+
+    const NAVY = '1B3260';
+    const GREEN = '2D8B5E';
+    const GRAY = '6B7686';
+
+    const filtro = $('filtro-segmento').value;
+    const respondentes = filtro ? relatorioRespondentes.filter((r) => r.segmento === filtro) : relatorioRespondentes;
+
+    const pptx = new window.PptxGenJS();
+    pptx.defineLayout({ name: 'FALCLIMA', width: 10, height: 5.63 });
+    pptx.layout = 'FALCLIMA';
+
+    const capa = pptx.addSlide();
+    capa.background = { color: NAVY };
+    capa.addText(relatorioSession.clienteNome || 'Cliente', { x: 0.5, y: 2.0, w: 8.2, h: 1, fontSize: 32, bold: true, color: 'FFFFFF', fontFace: 'Arial' });
+    capa.addText('Pesquisa de Clima Organizacional', { x: 0.5, y: 2.8, w: 8.2, h: 0.5, fontSize: 16, color: 'FFFFFF', fontFace: 'Arial' });
+    capa.addText(`${respondentes.length} respondente(s) · ${new Date().toLocaleDateString('pt-BR')}${filtro ? ' · ' + filtro : ''}`, { x: 0.5, y: 3.3, w: 8.2, h: 0.4, fontSize: 12, color: 'CBD5E1', fontFace: 'Arial' });
+    capa.addText('Falclima — Falcioni Consultoria', { x: 0.85, y: 5.08, w: 8.2, h: 0.3, fontSize: 10, color: '8FA3C8', fontFace: 'Arial' });
+    try { capa.addImage({ path: 'icons/falcioni-mark.png', x: 0.5, y: 5.02, w: 0.3, h: 0.3 }); } catch (e) { /* ignora se não carregar */ }
+    if (relatorioSession.logo) {
+      try { capa.addImage({ data: relatorioSession.logo, x: 8.3, y: 0.4, w: 1.2, h: 1.2 }); } catch (e) { /* ignora logo inválida */ }
+    }
+
+    (relatorioSession.perguntas || []).forEach((p) => {
+      const s = pptx.addSlide();
+      s.background = { color: 'FFFFFF' };
+      s.addText(p.texto, { x: 0.5, y: 0.35, w: 9, h: 0.9, fontSize: 18, bold: true, color: NAVY, fontFace: 'Arial' });
+
+      if (p.tipo === 'aberta') {
+        const comentariosAbertas = respondentes
+          .map((r) => ({ r, texto: r.abertas && r.abertas[p.id] }))
+          .filter((x) => x.texto)
+          .slice(0, 14);
+        if (!comentariosAbertas.length) {
+          s.addText('Sem respostas ainda.', { x: 0.5, y: 1.4, w: 9, h: 0.5, fontSize: 14, color: GRAY, italic: true, fontFace: 'Arial' });
+        } else {
+          const bullets = comentariosAbertas.map((x) => ({ text: x.texto, options: { bullet: true, color: '333333', breakLine: true } }));
+          s.addText(bullets, { x: 0.5, y: 1.35, w: 9, h: 3.9, fontSize: 12, valign: 'top', fontFace: 'Arial' });
+        }
+        return;
+      }
+
+      const valores = respondentes.map((r) => r.respostas && r.respostas[p.id]).filter((v) => v && typeof v.valor === 'number');
+      const media = valores.length ? valores.reduce((a, v) => a + v.valor, 0) / valores.length : null;
+      const max = p.tipo === 'nota10' ? 10 : 5;
+      const escalaLabel = p.tipo === 'nota10' ? '0 a 10' : '1 a 5';
+
+      s.addText(media === null ? '—' : formatarNumero(media), { x: 0.5, y: 1.3, w: 2.6, h: 1.1, fontSize: 44, bold: true, color: GREEN, fontFace: 'Arial' });
+      s.addText(`média de ${valores.length} resposta(s)\nescala ${escalaLabel}`, { x: 0.5, y: 2.35, w: 2.6, h: 0.7, fontSize: 11, color: GRAY, fontFace: 'Arial' });
+
+      const comentarios = respondentes
+        .map((r) => ({ r, resp: r.respostas && r.respostas[p.id] }))
+        .filter((x) => x.resp && x.resp.texto)
+        .slice(0, 8);
+      if (comentarios.length) {
+        const bullets = comentarios.map((c) => ({ text: `"${c.resp.texto}"`, options: { bullet: true, color: '333333', breakLine: true } }));
+        s.addText(bullets, { x: 3.3, y: 1.3, w: 6.2, h: 3.9, fontSize: 11, valign: 'top', fontFace: 'Arial' });
+      }
+    });
+
+    const nomeArquivo = `Relatorio-${(relatorioSession.clienteNome || 'clima').replace(/[^a-zA-Z0-9]+/g, '-')}.pptx`;
+    await pptx.writeFile({ fileName: nomeArquivo });
+  } catch (e) {
+    toast('Erro ao gerar PPT: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = textoOriginal;
+  }
+}
 
 function renderRelatorio() {
   const filtro = $('filtro-segmento').value;

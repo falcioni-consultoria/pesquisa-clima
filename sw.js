@@ -1,5 +1,5 @@
-const CACHE = 'pesquisa-clima-v1';
-const ARQUIVOS = ['./index.html', './style.css', './app.js', './questions.js', './voice.js', './firebase-config.js', './manifest.json'];
+const CACHE = 'pesquisa-clima-v2';
+const ARQUIVOS = ['./index.html', './style.css', './app.js', './questions.js', './voice.js', './firebase-config.js', './manifest.json', './icons/falcioni-mark.png'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ARQUIVOS)));

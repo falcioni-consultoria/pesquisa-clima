@@ -48,8 +48,9 @@ h2 { font-size: 18px; margin: 0 0 8px; color: var(--navy); }
   width: 36px; height: 36px; border-radius: 10px;
   background: rgba(255,255,255,0.12);
   display: flex; align-items: center; justify-content: center;
-  font-size: 18px; flex-shrink: 0;
+  font-size: 18px; flex-shrink: 0; overflow: hidden;
 }
+.logo-placeholder img { width: 100%; height: 100%; object-fit: contain; }
 .topbar-title { font-weight: 700; font-size: 15px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .topbar-subtitle { font-size: 12px; color: rgba(255,255,255,0.65); }
 .btn-icon {
@@ -114,6 +115,16 @@ h2 { font-size: 18px; margin: 0 0 8px; color: var(--navy); }
   border: 1.5px dashed var(--border); border-radius: 10px; padding: 16px; text-align: center;
   color: var(--text-muted); font-size: 13px;
 }
+.logo-upload { display: flex; align-items: center; gap: 14px; }
+.logo-upload-preview {
+  width: 56px; height: 56px; border-radius: 12px; border: 1.5px dashed var(--border);
+  display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0;
+  background: #fff; overflow: hidden;
+}
+.logo-upload-preview img { width: 100%; height: 100%; object-fit: contain; }
+.logo-upload-botoes { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.logo-upload-label { cursor: pointer; }
+.tela-header-acoes { display: flex; gap: 8px; flex-wrap: wrap; }
 
 /* Modelo escolha */
 .modelo-opcoes { display: grid; grid-template-columns: 1fr; gap: 10px; }
@@ -182,8 +193,9 @@ h2 { font-size: 18px; margin: 0 0 8px; color: var(--navy); }
 
 .aviso-inline { background: #fdecea; color: var(--danger); border-radius: 10px; padding: 10px 12px; font-size: 13px; margin-bottom: 12px; }
 
-.coleta-acoes { display: flex; gap: 10px; }
-.coleta-acoes .btn-primario { flex: 1; }
+.coleta-acoes { display: flex; gap: 8px; flex-wrap: wrap; }
+.coleta-acoes .btn-primario { flex: 1; min-width: 140px; }
+.coleta-acoes .btn-secundario { padding-left: 14px; padding-right: 14px; }
 
 /* Relatório */
 .relatorio-resumo { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
