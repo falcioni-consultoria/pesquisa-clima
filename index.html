@@ -48,7 +48,7 @@
     </div>
     <div id="lista-pesquisas" class="lista-pesquisas"></div>
     <p id="lista-vazia" class="texto-vazio hidden">Nenhuma pesquisa criada ainda. Toque em "Nova pesquisa" para começar.</p>
-    <p class="versao">Falclima · versão 8</p>
+    <p class="versao">Falclima · versão 9</p>
   </section>
 
   <!-- Nova pesquisa -->
@@ -147,6 +147,7 @@
         <button id="btn-mic" class="btn-mic" title="Ouvir resposta">🎤</button>
         <span id="mic-status">Toque no microfone e deixe o cliente responder</span>
         <div id="mic-nivel" class="mic-nivel hidden"><div id="mic-nivel-barra" class="mic-nivel-barra"></div></div>
+        <button type="button" id="btn-preciso" class="btn-link"></button>
         <button type="button" id="btn-modo-voz" class="btn-link"></button>
         <button type="button" id="btn-nuvem" class="btn-link"></button>
         <button type="button" id="btn-reforco" class="btn-link"></button>
@@ -156,6 +157,8 @@
         <span>Transcrição / comentário (editável)</span>
         <textarea id="transcricao-texto" rows="3" placeholder="A fala transcrita aparece aqui..."></textarea>
       </label>
+
+      <audio id="audio-replay" class="audio-replay hidden" controls></audio>
 
       <div id="voz-nao-suportada" class="aviso-inline hidden">
         Reconhecimento de voz não é suportado neste navegador. Use os botões acima para registrar a resposta manualmente, ou abra este app no Chrome/Edge.

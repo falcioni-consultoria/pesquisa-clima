@@ -7,6 +7,7 @@ import {
 import { NIVEIS, TIPO_LABEL, montarModelo, novaPergunta, SEGMENTOS_PADRAO } from './questions.js';
 import { parseResposta, reconhecimentoDisponivel, criarReconhecedor } from './voice.js';
 import { criarGravador, chaveNuvem, salvarChaveNuvem } from './voice-gravacao.js';
+import { criarPrecisoDeepgram, chaveDeepgram, salvarChaveDeepgram } from './voice-deepgram.js';
 
 const configPendente = firebaseConfig.apiKey === 'COLE_AQUI';
 let db = null;
@@ -423,6 +424,7 @@ function mostrarPergunta() {
   }
 
   atualizarBotoesVoz();
+  $('audio-replay').classList.add('hidden');
   $('mic-status').textContent = 'Toque no microfone e deixe o cliente responder';
   if (modoVoz === 'gravacao') garantirGravador().precarregar();
 }
@@ -478,12 +480,91 @@ function pararEscuta() {
     $('mic-nivel')?.classList.add('hidden');
   }
   const estavaOuvindo = coleta.ouvindo;
-  if (coleta.reconhecedor && coleta.ouvindo) coleta.reconhecedor.stop();
+  const motor = coleta.motor;
   coleta.ouvindo = false;
   $('btn-mic')?.classList.remove('ouvindo');
   $('mic-nivel')?.classList.add('hidden');
-  if (estavaOuvindo) $('mic-status').textContent = 'Toque no microfone para continuar a gravar';
+  if (estavaOuvindo) {
+    if (motor === 'preciso' && coleta.preciso) {
+      $('mic-status').textContent = 'Finalizando... pegando as últimas palavras';
+      coleta.aguardandoFinal = coleta.preciso.stop().then(() => {
+        coleta.aguardandoFinal = null;
+        if (!coleta.ouvindo) $('mic-status').textContent = 'Toque no microfone para acrescentar algo';
+      });
+    } else {
+      if (coleta.reconhecedor) coleta.reconhecedor.stop();
+      $('mic-status').textContent = 'Toque no microfone para continuar a gravar';
+    }
+  }
 }
+
+function termosDaPergunta(p) {
+  if (!p || p.tipo === 'aberta' || p.tipo === 'nota10') return [];
+  return NIVEIS[p.tipo] || [];
+}
+
+async function micPreciso() {
+  if (coleta.ouvindo) { pararEscuta(); return; }
+  if (coleta.aguardandoFinal) return;
+  if (!coleta.preciso) coleta.preciso = criarPrecisoDeepgram();
+  const idx = coleta.indicePergunta;
+  const respondente = coleta.respondenteRef;
+  const p = coleta.session.perguntas[idx];
+  const valido = () => coleta.indicePergunta === idx && coleta.respondenteRef === respondente;
+  coleta.textoBase = $('transcricao-texto').value.trim();
+  coleta.motor = 'preciso';
+  coleta.ouvindo = true;
+  $('btn-mic').classList.add('ouvindo');
+  $('audio-replay').classList.add('hidden');
+  $('mic-status').textContent = 'Conectando...';
+  coleta.preciso.start({
+    termos: termosDaPergunta(p),
+    onConectado: () => { if (coleta.ouvindo && valido()) $('mic-status').textContent = 'Ouvindo... toque novamente para parar'; },
+    onTranscricao: ({ completo }) => {
+      if (!valido()) return;
+      const base = coleta.textoBase;
+      $('transcricao-texto').value = base ? `${base} ${completo}` : completo;
+      if (p && p.tipo !== 'aberta') {
+        const valor = parseResposta(completo, p.tipo);
+        if (valor !== null) selecionarValor(valor);
+      }
+    },
+    onNivel: ({ nivel, baixo }) => {
+      if (!coleta.ouvindo || !valido()) return;
+      $('mic-nivel').classList.remove('hidden');
+      $('mic-nivel-barra').style.width = `${Math.round(nivel * 100)}%`;
+      $('mic-nivel-barra').classList.toggle('baixo', baixo);
+      if (baixo) $('mic-status').textContent = 'Voz baixa — aproxime o microfone do cliente';
+    },
+    onErro: (err) => {
+      coleta.ouvindo = false;
+      $('btn-mic').classList.remove('ouvindo');
+      $('mic-nivel').classList.add('hidden');
+      $('mic-status').textContent = err === 'not-allowed'
+        ? 'Microfone bloqueado — libere o acesso ao microfone no navegador.'
+        : err === 'sem-chave'
+          ? 'Falta a chave do serviço de voz — toque em "Alta precisão" para configurar.'
+          : 'Não consegui conectar ao serviço de voz — confira a chave e a internet.';
+    },
+    onFim: (texto, audio) => {
+      if (!valido() || !audio) return;
+      $('audio-replay').src = URL.createObjectURL(audio);
+      $('audio-replay').classList.remove('hidden');
+    },
+  });
+}
+
+$('btn-preciso').addEventListener('click', () => {
+  const nova = prompt(
+    'Cole a chave do Deepgram para ligar a voz de alta precisão.\n' +
+    'Ela fica salva só neste aparelho. Deixe vazio e confirme para desligar.',
+    chaveDeepgram(),
+  );
+  if (nova === null) return;
+  salvarChaveDeepgram(nova.trim());
+  atualizarBotoesVoz();
+  toast(nova.trim() ? 'Voz de alta precisão ligada.' : 'Voz de alta precisão desligada (volta ao modo do navegador).');
+});
 
 function lerReforcoVoz() {
   try {
@@ -515,13 +596,18 @@ function atualizarBotoesVoz() {
   $('btn-modo-voz').textContent = modoVoz === 'gravacao'
     ? '🎙 Modo: gravação (mais preciso, transcreve ao parar) — trocar'
     : '🎙 Modo: ao vivo (rápido) — trocar para gravação';
-  $('btn-reforco').classList.toggle('hidden', modoVoz === 'gravacao');
+  const preciso = !!chaveDeepgram();
+  $('btn-preciso').classList.toggle('hidden', modoVoz === 'gravacao');
+  $('btn-preciso').textContent = preciso
+    ? '🎯 Voz de alta precisão: ligada — trocar chave'
+    : '🎯 Voz de alta precisão: desligada — ativar';
+  $('btn-reforco').classList.toggle('hidden', modoVoz === 'gravacao' || preciso);
   $('btn-nuvem').classList.toggle('hidden', modoVoz !== 'gravacao');
   $('btn-nuvem').textContent = chaveNuvem()
     ? '☁️ Transcrição na nuvem (mais precisa): ligada — trocar chave'
     : '☁️ Transcrição na nuvem (mais precisa): desligada — ativar';
-  $('btn-mic').disabled = modoVoz === 'vivo' && !reconhecimentoDisponivel();
-  $('voz-nao-suportada').classList.toggle('hidden', modoVoz === 'gravacao' || reconhecimentoDisponivel());
+  $('btn-mic').disabled = modoVoz === 'vivo' && !preciso && !reconhecimentoDisponivel();
+  $('voz-nao-suportada').classList.toggle('hidden', modoVoz === 'gravacao' || preciso || reconhecimentoDisponivel());
 }
 
 $('btn-modo-voz').addEventListener('click', () => {
@@ -631,8 +717,10 @@ async function micGravacao() {
 
 $('btn-mic').addEventListener('click', () => {
   if (modoVoz === 'gravacao') { micGravacao(); return; }
+  if (chaveDeepgram()) { micPreciso(); return; }
   if (!reconhecimentoDisponivel()) return;
   if (coleta.ouvindo) { pararEscuta(); return; }
+  coleta.motor = 'chrome';
 
   if (!coleta.reconhecedor) {
     coleta.reconhecedor = criarReconhecedor({
@@ -676,6 +764,7 @@ $('btn-confirmar-pergunta').addEventListener('click', () => avancarPergunta(fals
 
 async function avancarPergunta(pular) {
   pararEscuta();
+  if (coleta.aguardandoFinal) await coleta.aguardandoFinal;
   const perguntas = coleta.session.perguntas;
   const p = perguntas[coleta.indicePergunta];
   const texto = $('transcricao-texto').value.trim();

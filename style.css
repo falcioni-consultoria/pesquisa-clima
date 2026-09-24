@@ -259,3 +259,5 @@ a.btn { text-decoration: none; display: inline-block; }
   .relatorio-perguntas { display: block !important; }
   .pergunta-relatorio-card { break-inside: avoid; margin-bottom: 14px; }
 }
+
+.audio-replay { width: 100%; margin: 4px 0 12px; }
