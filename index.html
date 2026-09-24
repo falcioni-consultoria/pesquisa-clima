@@ -41,7 +41,10 @@
   <section id="tela-lista" class="tela hidden">
     <div class="tela-header">
       <h1>Pesquisas</h1>
-      <button id="btn-nova-pesquisa" class="btn btn-primario">+ Nova pesquisa</button>
+      <div class="tela-header-acoes">
+        <button id="btn-gerenciar" class="btn btn-secundario">Gerenciar histórico</button>
+        <button id="btn-nova-pesquisa" class="btn btn-primario">+ Nova pesquisa</button>
+      </div>
     </div>
     <div id="lista-pesquisas" class="lista-pesquisas"></div>
     <p id="lista-vazia" class="texto-vazio hidden">Nenhuma pesquisa criada ainda. Toque em "Nova pesquisa" para começar.</p>
@@ -142,6 +145,8 @@
       <div class="mic-area">
         <button id="btn-mic" class="btn-mic" title="Ouvir resposta">🎤</button>
         <span id="mic-status">Toque no microfone e deixe o cliente responder</span>
+        <div id="mic-nivel" class="mic-nivel hidden"><div id="mic-nivel-barra" class="mic-nivel-barra"></div></div>
+        <button type="button" id="btn-reforco" class="btn-link"></button>
       </div>
 
       <label class="campo">

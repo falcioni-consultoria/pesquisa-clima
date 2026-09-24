@@ -97,6 +97,8 @@ h2 { font-size: 18px; margin: 0 0 8px; color: var(--navy); }
 .pesquisa-item-nome { font-weight: 700; color: var(--navy); }
 .pesquisa-item-meta { font-size: 12.5px; color: var(--text-muted); margin-top: 2px; }
 .badge-status { font-size: 11.5px; padding: 3px 9px; border-radius: 20px; font-weight: 700; white-space: nowrap; }
+.btn-apagar { background: #fdecea; color: var(--danger); border: none; border-radius: 8px; padding: 7px 12px; font-size: 13px; font-weight: 700; cursor: pointer; }
+.btn-apagar:hover { background: #f9d6d2; }
 .badge-aberta { background: #e4f5ec; color: var(--green-dark); }
 .badge-encerrada { background: #eef1f6; color: var(--text-muted); }
 .texto-vazio { color: var(--text-muted); text-align: center; margin-top: 40px; }
@@ -190,6 +192,9 @@ h2 { font-size: 18px; margin: 0 0 8px; color: var(--navy); }
   100% { box-shadow: 0 0 0 0 rgba(192,57,43,0); }
 }
 #mic-status { font-size: 13px; color: var(--text-muted); text-align: center; }
+.mic-nivel { width: 180px; height: 8px; background: var(--border); border-radius: 6px; overflow: hidden; }
+.mic-nivel-barra { height: 100%; width: 0%; background: var(--green); transition: width .1s linear; }
+.mic-nivel-barra.baixo { background: #e08a1e; }
 
 .aviso-inline { background: #fdecea; color: var(--danger); border-radius: 10px; padding: 10px 12px; font-size: 13px; margin-bottom: 12px; }
 

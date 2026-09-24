@@ -2,7 +2,7 @@ import { firebaseConfig } from './firebase-config.js';
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import {
   getFirestore, collection, doc, addDoc, updateDoc, onSnapshot,
-  query, orderBy, serverTimestamp, getDoc, getDocs, increment,
+  query, orderBy, serverTimestamp, getDoc, getDocs, increment, deleteDoc,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import { NIVEIS, TIPO_LABEL, montarModelo, novaPergunta, SEGMENTOS_PADRAO } from './questions.js';
 import { parseResposta, reconhecimentoDisponivel, criarReconhecedor } from './voice.js';
@@ -91,6 +91,8 @@ function rotear() {
   const hash = location.hash.replace(/^#\/?/, '');
   const [rota, param] = hash.split('/');
   pararEscuta();
+  modoGerenciar = false;
+  $('btn-gerenciar').textContent = 'Gerenciar histórico';
   if (rota === 'nova') return telaNova();
   if (rota === 'coleta' && param) return telaColeta(param);
   if (rota === 'relatorio' && param) return telaRelatorio(param);
@@ -128,12 +130,39 @@ async function telaLista() {
         <div class="pesquisa-item-meta">${formatarData(s.criadoEm)} · ${(s.perguntas || []).length} perguntas</div>
       </div>
       <span class="badge-status ${s.status === 'aberta' ? 'badge-aberta' : 'badge-encerrada'}">${s.status === 'aberta' ? 'Em coleta' : 'Encerrada'}</span>
+      ${modoGerenciar ? '<button type="button" class="btn-apagar">Apagar</button>' : ''}
     `;
     item.addEventListener('click', () => {
+      if (modoGerenciar) return;
       location.hash = s.status === 'aberta' ? `#/coleta/${docSnap.id}` : `#/relatorio/${docSnap.id}`;
+    });
+    item.querySelector('.btn-apagar')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      apagarPesquisa(docSnap.id, s.clienteNome || 'Sem nome');
     });
     cont.appendChild(item);
   });
+}
+
+let modoGerenciar = false;
+
+$('btn-gerenciar').addEventListener('click', () => {
+  modoGerenciar = !modoGerenciar;
+  $('btn-gerenciar').textContent = modoGerenciar ? 'Concluir' : 'Gerenciar histórico';
+  telaLista();
+});
+
+async function apagarPesquisa(id, nome) {
+  if (!confirm(`Apagar a pesquisa "${nome}" e todas as respostas dela?\n\nNão dá para desfazer.`)) return;
+  try {
+    const resp = await getDocs(collection(db, 'sessions', id, 'respondentes'));
+    await Promise.all(resp.docs.map((d) => deleteDoc(d.ref)));
+    await deleteDoc(doc(db, 'sessions', id));
+    toast('Pesquisa apagada.');
+  } catch (e) {
+    toast('Não foi possível apagar. Verifique a conexão e tente de novo.');
+  }
+  telaLista();
 }
 
 function escapeHtml(str) {
@@ -440,34 +469,68 @@ function selecionarValor(valor) {
 
 // microfone
 function pararEscuta() {
+  const estavaOuvindo = coleta.ouvindo;
   if (coleta.reconhecedor && coleta.ouvindo) coleta.reconhecedor.stop();
   coleta.ouvindo = false;
   $('btn-mic')?.classList.remove('ouvindo');
+  $('mic-nivel')?.classList.add('hidden');
+  if (estavaOuvindo) $('mic-status').textContent = 'Toque no microfone para continuar a gravar';
 }
+
+function lerReforcoVoz() {
+  try {
+    const v = localStorage.getItem('falclima_reforco');
+    if (v !== null) return v === '1';
+  } catch (e) { /* sem storage */ }
+  return !/Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
+}
+let reforcoVoz = lerReforcoVoz();
+
+function atualizarBotaoReforco() {
+  $('btn-reforco').textContent = `🔊 Reforço de voz baixa: ${reforcoVoz ? 'ligado' : 'desligado'}`;
+}
+atualizarBotaoReforco();
+
+$('btn-reforco').addEventListener('click', () => {
+  reforcoVoz = !reforcoVoz;
+  try { localStorage.setItem('falclima_reforco', reforcoVoz ? '1' : '0'); } catch (e) { /* sem storage */ }
+  atualizarBotaoReforco();
+  toast(reforcoVoz ? 'Reforço ligado — vale a partir da próxima gravação.' : 'Reforço desligado.');
+});
 
 $('btn-mic').addEventListener('click', () => {
   if (!reconhecimentoDisponivel()) return;
   if (coleta.ouvindo) { pararEscuta(); return; }
 
-  const perguntas = coleta.session.perguntas;
-  const p = perguntas[coleta.indicePergunta];
-
   if (!coleta.reconhecedor) {
     coleta.reconhecedor = criarReconhecedor({
+      reforco: () => reforcoVoz,
       onTranscricao: ({ completo }) => {
-        $('transcricao-texto').value = completo;
-        if (p.tipo !== 'aberta') {
+        const base = coleta.textoBase;
+        $('transcricao-texto').value = base ? `${base} ${completo}` : completo;
+        const p = coleta.session.perguntas[coleta.indicePergunta];
+        if (p && p.tipo !== 'aberta') {
           const valor = parseResposta(completo, p.tipo);
           if (valor !== null) selecionarValor(valor);
         }
       },
+      onNivel: ({ nivel, baixo }) => {
+        if (!coleta.ouvindo) return;
+        $('mic-nivel').classList.remove('hidden');
+        $('mic-nivel-barra').style.width = `${Math.round(nivel * 100)}%`;
+        $('mic-nivel-barra').classList.toggle('baixo', baixo);
+        $('mic-status').textContent = baixo ? 'Voz baixa — aproxime o microfone do cliente' : 'Ouvindo... toque novamente para parar';
+      },
       onErro: (err) => {
-        $('mic-status').textContent = err === 'no-speech' ? 'Não ouvi nada, tente novamente.' : `Erro no microfone (${err})`;
         pararEscuta();
+        $('mic-status').textContent = err === 'not-allowed' || err === 'service-not-allowed'
+          ? 'Microfone bloqueado — libere o acesso ao microfone no navegador.'
+          : `Erro no microfone (${err})`;
       },
       onFim: () => { pararEscuta(); },
     });
   }
+  coleta.textoBase = $('transcricao-texto').value.trim();
   coleta.reconhecedor.start();
   coleta.ouvindo = true;
   $('btn-mic').classList.add('ouvindo');

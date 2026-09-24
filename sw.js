@@ -1,4 +1,4 @@
-const CACHE = 'pesquisa-clima-v2';
+const CACHE = 'pesquisa-clima-v3';
 const ARQUIVOS = ['./index.html', './style.css', './app.js', './questions.js', './voice.js', './firebase-config.js', './manifest.json', './icons/falcioni-mark.png'];
 
 self.addEventListener('install', (event) => {

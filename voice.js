@@ -73,48 +73,159 @@ export function reconhecimentoDisponivel() {
   return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
 }
 
-// Wrapper simples em cima do SpeechRecognition contínuo em pt-BR
-export function criarReconhecedor({ onTranscricao, onErro, onFim }) {
+// Captura o microfone com ganho extra + compressor (deixa voz baixa mais alta) e mede o nível.
+// Devolve { track, parar } ou null se o navegador negar/não tiver microfone.
+async function iniciarReforco(onNivel) {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+    });
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const origem = ctx.createMediaStreamSource(stream);
+    const ganho = ctx.createGain();
+    ganho.gain.value = 4;
+    const compressor = ctx.createDynamicsCompressor();
+    compressor.threshold.value = -50;
+    compressor.knee.value = 40;
+    compressor.ratio.value = 12;
+    compressor.attack.value = 0;
+    compressor.release.value = 0.25;
+    const destino = ctx.createMediaStreamDestination();
+    const analisador = ctx.createAnalyser();
+    analisador.fftSize = 1024;
+    origem.connect(ganho);
+    ganho.connect(compressor);
+    compressor.connect(destino);
+    compressor.connect(analisador);
+
+    const buf = new Uint8Array(analisador.fftSize);
+    const inicio = Date.now();
+    let picos = [];
+    const timer = setInterval(() => {
+      analisador.getByteTimeDomainData(buf);
+      let soma = 0;
+      for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; soma += v * v; }
+      const nivel = Math.min(1, Math.sqrt(soma / buf.length) * 6);
+      const agora = Date.now();
+      picos.push({ t: agora, nivel });
+      picos = picos.filter((p) => agora - p.t < 3000);
+      const maximo = Math.max(...picos.map((p) => p.nivel));
+      const baixo = agora - inicio > 4000 && maximo < 0.15;
+      onNivel && onNivel({ nivel, baixo });
+    }, 120);
+
+    return {
+      track: destino.stream.getAudioTracks()[0],
+      parar() {
+        clearInterval(timer);
+        stream.getTracks().forEach((t) => t.stop());
+        ctx.close().catch(() => {});
+      },
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+// SpeechRecognition contínuo em pt-BR que reinicia sozinho nas pausas (cliente que fala baixo/devagar)
+// e, com `reforco`, alimenta o reconhecimento com áudio amplificado quando o navegador suporta.
+export function criarReconhecedor({ onTranscricao, onErro, onFim, onNivel, reforco = false }) {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) return null;
-  const rec = new SR();
-  rec.lang = 'pt-BR';
-  rec.continuous = true;
-  rec.interimResults = true;
 
+  let rec = null;
   let transcricaoFinal = '';
+  let ultimoInterim = '';
+  let querOuvir = false;
+  let reforcoAtivo = null;
+  let inicioRec = 0;
+  let falhasRapidas = 0;
 
-  rec.onresult = (event) => {
-    let interim = '';
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      const resultado = event.results[i];
-      if (resultado.isFinal) {
-        transcricaoFinal += (transcricaoFinal ? ' ' : '') + resultado[0].transcript.trim();
-      } else {
-        interim += resultado[0].transcript;
-      }
-    }
-    onTranscricao && onTranscricao({ final: transcricaoFinal, interim, completo: (transcricaoFinal + ' ' + interim).trim() });
-  };
+  function emitir() {
+    onTranscricao && onTranscricao({
+      final: transcricaoFinal,
+      interim: ultimoInterim,
+      completo: (transcricaoFinal + ' ' + ultimoInterim).trim(),
+    });
+  }
 
-  rec.onerror = (event) => {
-    onErro && onErro(event.error);
-  };
-
-  rec.onend = () => {
+  function encerrar() {
+    if (reforcoAtivo) { reforcoAtivo.parar(); reforcoAtivo = null; }
     onFim && onFim(transcricaoFinal);
-  };
+  }
+
+  function iniciarRec() {
+    rec = new SR();
+    rec.lang = 'pt-BR';
+    rec.continuous = true;
+    rec.interimResults = true;
+
+    rec.onresult = (event) => {
+      falhasRapidas = 0;
+      let interim = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const resultado = event.results[i];
+        if (resultado.isFinal) {
+          transcricaoFinal += (transcricaoFinal ? ' ' : '') + resultado[0].transcript.trim();
+        } else {
+          interim += resultado[0].transcript;
+        }
+      }
+      ultimoInterim = interim;
+      emitir();
+    };
+
+    rec.onerror = (event) => {
+      if (event.error === 'no-speech' || event.error === 'aborted') return;
+      querOuvir = false;
+      onErro && onErro(event.error);
+    };
+
+    rec.onend = () => {
+      if (ultimoInterim) {
+        transcricaoFinal += (transcricaoFinal ? ' ' : '') + ultimoInterim.trim();
+        ultimoInterim = '';
+        emitir();
+      }
+      if (querOuvir) {
+        if (Date.now() - inicioRec < 500) falhasRapidas++;
+        if (falhasRapidas >= 5) { querOuvir = false; onErro && onErro('falha-audio'); encerrar(); return; }
+        setTimeout(() => { if (querOuvir) iniciarRec(); else encerrar(); }, 150);
+        return;
+      }
+      encerrar();
+    };
+
+    inicioRec = Date.now();
+    const track = reforcoAtivo && reforcoAtivo.track;
+    try {
+      if (track) rec.start(track); else rec.start();
+    } catch (e) {
+      try { rec.start(); } catch (e2) { /* já iniciado */ }
+    }
+  }
 
   return {
-    start() {
+    async start() {
       transcricaoFinal = '';
-      try { rec.start(); } catch (e) { /* já iniciado */ }
+      ultimoInterim = '';
+      falhasRapidas = 0;
+      querOuvir = true;
+      const usarReforco = typeof reforco === 'function' ? reforco() : reforco;
+      if (usarReforco) {
+        const r = await iniciarReforco(onNivel);
+        if (!querOuvir) { if (r) r.parar(); return; }
+        reforcoAtivo = r;
+      }
+      iniciarRec();
     },
     stop() {
-      rec.stop();
+      querOuvir = false;
+      if (rec) { try { rec.stop(); } catch (e) { /* já parado */ } } else { encerrar(); }
     },
     reset() {
       transcricaoFinal = '';
+      ultimoInterim = '';
     },
   };
 }
