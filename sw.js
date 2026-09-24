@@ -1,4 +1,4 @@
-const CACHE = 'pesquisa-clima-v3';
+const CACHE = 'pesquisa-clima-v4';
 const ARQUIVOS = ['./index.html', './style.css', './app.js', './questions.js', './voice.js', './firebase-config.js', './manifest.json', './icons/falcioni-mark.png'];
 
 self.addEventListener('install', (event) => {
@@ -19,7 +19,7 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   if (event.request.url.includes('firestore.googleapis.com') || event.request.url.includes('gstatic.com')) return;
   event.respondWith(
-    fetch(event.request)
+    fetch(event.request, { cache: 'no-cache' })
       .then((resp) => {
         const copia = resp.clone();
         caches.open(CACHE).then((cache) => cache.put(event.request, copia));
