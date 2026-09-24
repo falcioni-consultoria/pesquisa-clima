@@ -19,12 +19,12 @@ async function decodificar(blob) {
 }
 
 export function chaveNuvem() {
-  try { return localStorage.getItem('falclima_openai_key') || ''; } catch (e) { return ''; }
+  try { return localStorage.getItem('falclima_nuvem_key') || ''; } catch (e) { return ''; }
 }
 
 export function salvarChaveNuvem(chave) {
   try {
-    if (chave) localStorage.setItem('falclima_openai_key', chave); else localStorage.removeItem('falclima_openai_key');
+    if (chave) localStorage.setItem('falclima_nuvem_key', chave); else localStorage.removeItem('falclima_nuvem_key');
   } catch (e) { /* sem storage */ }
 }
 
@@ -40,23 +40,32 @@ function paraWav(x, taxa) {
   return buf;
 }
 
-// Transcrição na nuvem (OpenAI): a mais precisa. Só roda se houver chave salva neste aparelho.
+export function wavBlob(audio) {
+  return new Blob([paraWav(audio, 16000)], { type: 'audio/wav' });
+}
+
+// Transcrição na nuvem. Chave "gsk_..." = Groq (gratuito, Whisper large-v3); "sk-..." = OpenAI.
+function provedor(chave) {
+  return chave.startsWith('gsk_')
+    ? { url: 'https://api.groq.com/openai/v1/audio/transcriptions', modelos: ['whisper-large-v3', 'whisper-large-v3-turbo'] }
+    : { url: 'https://api.openai.com/v1/audio/transcriptions', modelos: ['gpt-4o-transcribe', 'whisper-1'] };
+}
+
 async function transcreverNuvem(audio, chave, dica) {
   const wav = paraWav(audio, 16000);
-  for (const modelo of ['gpt-4o-transcribe', 'whisper-1']) {
+  const { url, modelos } = provedor(chave);
+  for (const modelo of modelos) {
     const fd = new FormData();
     fd.append('file', new Blob([wav], { type: 'audio/wav' }), 'audio.wav');
     fd.append('model', modelo);
     fd.append('language', 'pt');
     fd.append('temperature', '0');
     if (dica) fd.append('prompt', dica);
-    const r = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-      method: 'POST', headers: { Authorization: `Bearer ${chave}` }, body: fd,
-    });
+    const r = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${chave}` }, body: fd });
     if (r.status === 401) throw new Error('chave-invalida');
-    if (r.status === 429) throw new Error('sem-credito');
     if (r.ok) return ((await r.json()).text || '').trim();
-    if (r.status !== 400 && r.status !== 404) throw new Error('nuvem-' + r.status);
+    if (r.status === 429 && modelo === modelos[modelos.length - 1]) throw new Error('limite');
+    if (r.status !== 400 && r.status !== 404 && r.status !== 429) throw new Error('nuvem-' + r.status);
   }
   throw new Error('nuvem-indisponivel');
 }
@@ -147,7 +156,7 @@ export function criarGravador({ onNivel, onModelo }) {
         try {
           return await transcreverNuvem(audio, chave, dica);
         } catch (e) {
-          if (e.message === 'chave-invalida' || e.message === 'sem-credito') throw e;
+          if (e.message === 'chave-invalida' || e.message === 'limite') throw e;
           // sem internet ou falha da nuvem: cai para a transcrição local
         }
       }
