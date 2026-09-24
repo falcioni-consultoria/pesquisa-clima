@@ -1,6 +1,6 @@
 # Falclima — Falcioni Consultoria
 
-App para aplicar pesquisas de clima organizacional durante a entrevista com o cliente: o consultor lê a pergunta, o respondente fala a resposta, o microfone transcreve e sugere a nota/nível automaticamente, e o relatório (média por pergunta, comentários anônimos) vai sendo montado em tempo real conforme cada pessoa responde.
+App para aplicar pesquisas de clima organizacional durante a entrevista com o cliente: o consultor faz a pergunta, marca a nota/nível com um toque e digita o comentário do respondente (o app corrige sozinho os erros de digitação rápida). O relatório (média por pergunta, comentários anônimos) vai sendo montado em tempo real conforme cada pessoa responde.
 
 Dois modelos prontos, no mesmo ambiente:
 - **Nota 0 a 10** — 10 perguntas padrão (extraídas do modelo real já usado) + 2 abertas.
@@ -29,25 +29,25 @@ match /sessions/{sessionId} {
 
 ## 2. Publicar (GitHub Pages)
 
-Tudo fica no GitHub, sem token de terceiro para renovar. Repositório: https://github.com/Liviatzu/pesquisa-clima
+Tudo fica no GitHub, sem token de terceiro para renovar. Repositório: https://github.com/falcioni-consultoria/pesquisa-clima
 
 O GitHub Pages já está ativado (branch `main`, pasta `/`). O app fica no ar em:
 
-**https://liviatzu.github.io/pesquisa-clima/**
+**https://falcioni-consultoria.github.io/pesquisa-clima/**
 
 Toda atualização é só `git push` — o GitHub publica sozinho em 1-2 minutos, sem nenhum passo manual.
 
 ## 3. Usar
 
 1. **Nova pesquisa** → nome do cliente, segmentos (setores) opcionais, escolher modelo (ou editar as perguntas) → "Criar pesquisa e começar a coletar".
-2. Na coleta: escolha o segmento do respondente (se configurado), toque no microfone 🎤, deixe o cliente responder, confirme a nota/nível sugerido (ou toque no botão certo manualmente) e avance. Ao terminar as perguntas, o app já abre um novo respondente automaticamente.
+2. Na coleta: escolha o segmento do respondente (se configurado), toque na nota/nível e digite o comentário — erros de digitação são corrigidos ao apertar espaço (toque na etiqueta amarela para desfazer). Use "← Anterior" para acrescentar algo. Ao terminar as perguntas, o app já abre um novo respondente automaticamente.
 3. **Relatório** (acessível a qualquer momento pela lista de pesquisas) mostra a média e a distribuição de cada pergunta, comentários anônimos (só "Respondente N", nunca o nome) e um botão para imprimir/salvar em PDF.
-4. Reconhecimento de voz funciona melhor no **Chrome** ou **Edge** (Android/desktop). No iPhone/Safari a transcrição pode não estar disponível — nesse caso, dá pra registrar a resposta tocando direto no número/nível.
+4. A autocorreção usa um dicionário de português próprio (`dicionario-pt.txt`, ver `dicionario-pt-LICENCA.txt`) e pode ser desligada no botão "✍️ Autocorreção da digitação".
 
 ## Estrutura
 
 - `index.html`, `style.css`, `app.js` — a aplicação.
 - `questions.js` — banco de perguntas padrão dos dois modelos.
-- `voice.js` — reconhecimento de voz e interpretação da resposta falada.
+- `autocorrecao.js` + `dicionario-pt.txt` — autocorreção da digitação rápida em português.
 - `firebase-config.js` — credenciais do projeto Firebase `falcioni-kpis` (compartilhado com o Falcioni KPIs).
 - `manifest.json`, `sw.js`, `icons/` — PWA (instalável no celular/tablet).

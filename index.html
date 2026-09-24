@@ -48,7 +48,7 @@
     </div>
     <div id="lista-pesquisas" class="lista-pesquisas"></div>
     <p id="lista-vazia" class="texto-vazio hidden">Nenhuma pesquisa criada ainda. Toque em "Nova pesquisa" para começar.</p>
-    <p class="versao">Falclima · versão 11</p>
+    <p class="versao">Falclima · versão 12</p>
   </section>
 
   <!-- Nova pesquisa -->
@@ -115,7 +115,7 @@
     <button id="btn-criar-pesquisa" class="btn btn-primario btn-largo">Criar pesquisa e começar a coletar</button>
   </section>
 
-  <!-- Coleta (captura por voz) -->
+  <!-- Coleta -->
   <section id="tela-coleta" class="tela hidden">
 
     <div class="coleta-status">
@@ -141,29 +141,15 @@
 
       <div id="resposta-nota10" class="resposta-nota10 hidden"></div>
       <div id="resposta-likert" class="resposta-likert hidden"></div>
-      <div id="resposta-aberta-aviso" class="ajuda hidden">Resposta livre — grave a fala do respondente abaixo.</div>
+      <div id="resposta-aberta-aviso" class="ajuda hidden">Resposta livre — digite o que o respondente disser.</div>
 
-      <div class="mic-area">
-        <button id="btn-mic" class="btn-mic" title="Ouvir resposta">🎤</button>
-        <span id="mic-status">Toque no microfone e deixe o cliente responder</span>
-        <div id="mic-nivel" class="mic-nivel hidden"><div id="mic-nivel-barra" class="mic-nivel-barra"></div></div>
-        <button type="button" id="btn-modo-voz" class="btn-link"></button>
-        <button type="button" id="btn-nuvem" class="btn-link"></button>
-        <button type="button" id="btn-reforco" class="btn-link"></button>
-      </div>
 
       <label class="campo">
-        <span>Transcrição / comentário (editável)</span>
-        <textarea id="transcricao-texto" rows="3" lang="pt-BR" spellcheck="true" autocapitalize="sentences" placeholder="Digite o que o cliente fala (o app corrige erros de digitação) ou use o microfone..."></textarea>
+        <span>Comentário do respondente</span>
+        <textarea id="transcricao-texto" rows="3" lang="pt-BR" spellcheck="true" autocapitalize="sentences" placeholder="Digite o que o cliente fala (o app corrige os erros de digitação)..."></textarea>
       </label>
       <div id="correcoes" class="correcoes"></div>
       <button type="button" id="btn-autocorrecao" class="btn-link"></button>
-
-      <audio id="audio-replay" class="audio-replay hidden" controls></audio>
-
-      <div id="voz-nao-suportada" class="aviso-inline hidden">
-        Reconhecimento de voz não é suportado neste navegador. Use os botões acima para registrar a resposta manualmente, ou abra este app no Chrome/Edge.
-      </div>
 
       <div class="coleta-acoes">
         <button id="btn-anterior-pergunta" class="btn btn-secundario" title="Voltar para adicionar algo na resposta anterior">← Anterior</button>

@@ -5,8 +5,6 @@ import {
   query, orderBy, serverTimestamp, getDoc, getDocs, increment, deleteDoc,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import { NIVEIS, TIPO_LABEL, montarModelo, novaPergunta, SEGMENTOS_PADRAO } from './questions.js';
-import { parseResposta, reconhecimentoDisponivel, criarReconhecedor } from './voice.js';
-import { criarGravador, chaveNuvem, salvarChaveNuvem, wavBlob } from './voice-gravacao.js';
 import { carregarCorretor, ativarAutocorrecao, autocorrecaoLigada, definirAutocorrecao, desfazerCorrecao } from './autocorrecao.js';
 
 const configPendente = firebaseConfig.apiKey === 'COLE_AQUI';
@@ -84,7 +82,6 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 $('btn-voltar').addEventListener('click', () => {
-  pararEscuta();
   location.hash = '#/';
 });
 
@@ -92,7 +89,6 @@ function rotear() {
   if (configPendente) { mostrarTela('tela-config-aviso'); return; }
   const hash = location.hash.replace(/^#\/?/, '');
   const [rota, param] = hash.split('/');
-  pararEscuta();
   modoGerenciar = false;
   $('btn-gerenciar').textContent = 'Gerenciar histórico';
   if (rota === 'nova') return telaNova();
@@ -298,8 +294,6 @@ const coleta = {
   seq: 1,
   segmento: null,
   indicePergunta: 0,
-  reconhecedor: null,
-  ouvindo: false,
   valorAtual: null,
   respostasCache: {},
 };
@@ -336,7 +330,6 @@ $('btn-encerrar-pesquisa').addEventListener('click', async () => {
 });
 
 async function iniciarNovoRespondente() {
-  pararEscuta();
   coleta.indicePergunta = 0;
   coleta.segmento = null;
   coleta.respostasCache = {};
@@ -391,7 +384,6 @@ function mostrarBlocoSegmento(segmentos) {
 $('btn-pular-segmento').addEventListener('click', () => mostrarPergunta());
 
 function mostrarPergunta() {
-  pararEscuta();
   $('bloco-segmento').classList.add('hidden');
   $('bloco-pergunta').classList.remove('hidden');
   const perguntas = coleta.session.perguntas;
@@ -423,17 +415,12 @@ function mostrarPergunta() {
     if (p.tipo !== 'aberta' && cache.valor !== undefined) selecionarValor(cache.valor);
   }
 
-  atualizarBotoesVoz();
   correcoesRecentes.length = 0;
   renderCorrecoes();
-  $('audio-replay').classList.add('hidden');
-  $('mic-status').textContent = 'Toque no microfone e deixe o cliente responder';
-  if (modoVoz === 'gravacao' && !chaveNuvem()) garantirGravador().precarregar();
 }
 
 function voltarPergunta() {
   if (coleta.indicePergunta <= 0) return;
-  pararEscuta();
   coleta.indicePergunta--;
   mostrarPergunta();
 }
@@ -513,219 +500,10 @@ ativarAutocorrecao($('transcricao-texto'), {
   },
 });
 
-// microfone
-function pararEscuta() {
-  if (coleta.gravando) {
-    if (coleta.gravador) coleta.gravador.cancelar();
-    coleta.gravando = false;
-    $('btn-mic')?.classList.remove('ouvindo');
-    $('mic-nivel')?.classList.add('hidden');
-  }
-  const estavaOuvindo = coleta.ouvindo;
-  coleta.ouvindo = false;
-  $('btn-mic')?.classList.remove('ouvindo');
-  $('mic-nivel')?.classList.add('hidden');
-  if (estavaOuvindo) {
-    if (coleta.reconhecedor) coleta.reconhecedor.stop();
-    $('mic-status').textContent = 'Toque no microfone para continuar a gravar';
-  }
-}
-
-function lerReforcoVoz() {
-  try {
-    const v = localStorage.getItem('falclima_reforco');
-    if (v !== null) return v === '1';
-  } catch (e) { /* sem storage */ }
-  return false;
-}
-let reforcoVoz = lerReforcoVoz();
-
-function atualizarBotaoReforco() {
-  $('btn-reforco').textContent = `🔊 Reforço de voz baixa: ${reforcoVoz ? 'ligado' : 'desligado'}`;
-}
-atualizarBotaoReforco();
-
-$('btn-reforco').addEventListener('click', () => {
-  reforcoVoz = !reforcoVoz;
-  try { localStorage.setItem('falclima_reforco', reforcoVoz ? '1' : '0'); } catch (e) { /* sem storage */ }
-  atualizarBotaoReforco();
-  toast(reforcoVoz ? 'Reforço ligado — vale a partir da próxima gravação.' : 'Reforço desligado.');
-});
-
-function lerModoVoz() {
-  try { return localStorage.getItem('falclima_modo_voz') === 'gravacao' ? 'gravacao' : 'vivo'; } catch (e) { return 'vivo'; }
-}
-let modoVoz = lerModoVoz();
-
-function atualizarBotoesVoz() {
-  $('btn-modo-voz').textContent = modoVoz === 'gravacao'
-    ? '🎙 Modo: gravação (mais preciso, transcreve ao parar) — trocar'
-    : '🎙 Modo: ao vivo (rápido) — trocar para gravação';
-  $('btn-reforco').classList.toggle('hidden', modoVoz === 'gravacao');
-  $('btn-nuvem').textContent = chaveNuvem()
-    ? '☁️ Transcrição precisa (gratuita): ligada — trocar chave'
-    : '☁️ Transcrição precisa (gratuita): desligada — ativar';
-  $('btn-mic').disabled = modoVoz === 'vivo' && !reconhecimentoDisponivel();
-  $('voz-nao-suportada').classList.toggle('hidden', modoVoz === 'gravacao' || reconhecimentoDisponivel());
-}
-
-$('btn-modo-voz').addEventListener('click', () => {
-  pararEscuta();
-  modoVoz = modoVoz === 'vivo' ? 'gravacao' : 'vivo';
-  try { localStorage.setItem('falclima_modo_voz', modoVoz); } catch (e) { /* sem storage */ }
-  atualizarBotoesVoz();
-  if (modoVoz === 'gravacao') {
-    if (!chaveNuvem()) garantirGravador().precarregar();
-    toast('Modo gravação: grave a resposta, toque para parar e aguarde a transcrição.');
-  }
-});
-
-$('btn-nuvem').addEventListener('click', () => {
-  const nova = prompt(
-    'Cole a chave do Groq (começa com gsk_) para ligar a transcrição precisa e gratuita.\n' +
-    'Ela fica salva só neste aparelho. Deixe vazio e confirme para desligar.',
-    chaveNuvem(),
-  );
-  if (nova === null) return;
-  salvarChaveNuvem(nova.trim());
-  if (nova.trim() && modoVoz !== 'gravacao') {
-    modoVoz = 'gravacao';
-    try { localStorage.setItem('falclima_modo_voz', 'gravacao'); } catch (e) { /* sem storage */ }
-  }
-  atualizarBotoesVoz();
-  toast(nova.trim() ? 'Transcrição precisa ligada — agora grave a resposta, toque para parar e aguarde.' : 'Transcrição precisa desligada (usa a local).');
-});
-
-function dicaTranscricao(p) {
-  if (!p) return '';
-  if (p.tipo === 'nota10') return 'Resposta a uma pergunta com nota de zero a dez. Exemplo: "Dou sete, porque as ferramentas ajudam."';
-  if (p.tipo === 'aberta') return 'Comentário de um colaborador sobre o ambiente de trabalho.';
-  return `Resposta a uma pergunta de múltipla escolha: ${(NIVEIS[p.tipo] || []).join(', ')}.`;
-}
-
-function garantirGravador() {
-  if (!coleta.gravador) {
-    coleta.gravador = criarGravador({
-      onNivel: ({ nivel, baixo }) => {
-        if (!coleta.gravando) return;
-        $('mic-nivel').classList.remove('hidden');
-        $('mic-nivel-barra').style.width = `${Math.round(nivel * 100)}%`;
-        $('mic-nivel-barra').classList.toggle('baixo', baixo);
-        $('mic-status').textContent = baixo ? 'Voz baixa — aproxime o microfone do cliente' : 'Gravando... toque novamente para parar';
-      },
-      onModelo: (pct) => {
-        if (coleta.gravando || coleta.transcrevendo || modoVoz !== 'gravacao') return;
-        $('mic-status').textContent = pct < 100
-          ? `Preparando a voz... ${pct}% (só na primeira vez)`
-          : 'Voz pronta. Toque no microfone e deixe o cliente responder';
-      },
-    });
-  }
-  return coleta.gravador;
-}
-
-function definirBotoesOcupados(ocupado) {
-  $('btn-confirmar-pergunta').disabled = ocupado;
-  $('btn-pular-pergunta').disabled = ocupado;
-  $('btn-anterior-pergunta').disabled = ocupado || coleta.indicePergunta === 0;
-  $('btn-mic').disabled = ocupado;
-}
-
-async function micGravacao() {
-  if (coleta.transcrevendo) return;
-  const g = garantirGravador();
-  if (coleta.gravando) {
-    coleta.gravando = false;
-    $('btn-mic').classList.remove('ouvindo');
-    $('mic-nivel').classList.add('hidden');
-    const p = coleta.session.perguntas[coleta.indicePergunta];
-    coleta.transcrevendo = true;
-    definirBotoesOcupados(true);
-    $('mic-status').textContent = 'Transcrevendo... aguarde';
-    try {
-      const audio = await g.parar();
-      if (!audio) { $('mic-status').textContent = 'Não captei áudio — aproxime o microfone e grave de novo.'; return; }
-      $('audio-replay').src = URL.createObjectURL(wavBlob(audio));
-      $('audio-replay').classList.remove('hidden');
-      const texto = await g.transcrever(audio, dicaTranscricao(p));
-      if (!texto) { $('mic-status').textContent = 'Não entendi nada — grave de novo.'; return; }
-      const base = coleta.textoBase;
-      $('transcricao-texto').value = base ? `${base} ${texto}` : texto;
-      if (p && p.tipo !== 'aberta') {
-        const valor = parseResposta(texto, p.tipo);
-        if (valor !== null) selecionarValor(valor);
-      }
-      $('mic-status').textContent = 'Pronto. Confira a nota e toque no microfone para acrescentar algo.';
-    } catch (e) {
-      $('mic-status').textContent = e.message === 'chave-invalida'
-        ? 'A chave não foi aceita — toque em "Transcrição precisa" para conferir ou trocar.'
-        : e.message === 'limite'
-          ? 'Limite do serviço gratuito atingido — aguarde 1 minuto e tente de novo.'
-          : 'Não consegui transcrever — verifique a internet (o modelo de voz baixa na primeira vez).';
-    } finally {
-      coleta.transcrevendo = false;
-      definirBotoesOcupados(false);
-    }
-    return;
-  }
-  try {
-    coleta.textoBase = $('transcricao-texto').value.trim();
-    await g.iniciar();
-    coleta.gravando = true;
-    $('btn-mic').classList.add('ouvindo');
-    $('mic-status').textContent = 'Gravando... toque novamente para parar';
-  } catch (e) {
-    $('mic-status').textContent = 'Microfone bloqueado — libere o acesso ao microfone no navegador.';
-  }
-}
-
-$('btn-mic').addEventListener('click', () => {
-  if (modoVoz === 'gravacao') { micGravacao(); return; }
-  if (!reconhecimentoDisponivel()) return;
-  if (coleta.ouvindo) { pararEscuta(); return; }
-
-  if (!coleta.reconhecedor) {
-    coleta.reconhecedor = criarReconhecedor({
-      reforco: () => reforcoVoz,
-      onTranscricao: ({ completo }) => {
-        const base = coleta.textoBase;
-        $('transcricao-texto').value = base ? `${base} ${completo}` : completo;
-        const p = coleta.session.perguntas[coleta.indicePergunta];
-        if (p && p.tipo !== 'aberta') {
-          const valor = parseResposta(completo, p.tipo);
-          if (valor !== null) selecionarValor(valor);
-        }
-      },
-      onNivel: ({ nivel, baixo }) => {
-        if (!coleta.ouvindo) return;
-        $('mic-nivel').classList.remove('hidden');
-        $('mic-nivel-barra').style.width = `${Math.round(nivel * 100)}%`;
-        $('mic-nivel-barra').classList.toggle('baixo', baixo);
-        $('mic-status').textContent = baixo ? 'Voz baixa — aproxime o microfone ou aumente o volume de entrada do computador' : 'Ouvindo... toque novamente para parar';
-      },
-      onErro: (err) => {
-        pararEscuta();
-        $('mic-status').textContent = err === 'not-allowed' || err === 'service-not-allowed'
-          ? 'Microfone bloqueado — libere o acesso ao microfone no navegador.'
-          : err === 'falha-audio' || err === 'audio-capture'
-            ? 'Não consegui ouvir o microfone — confira se é o microfone certo e se a internet está ativa.'
-            : `Erro no microfone (${err})`;
-      },
-      onFim: () => { pararEscuta(); },
-    });
-  }
-  coleta.textoBase = $('transcricao-texto').value.trim();
-  coleta.reconhecedor.start();
-  coleta.ouvindo = true;
-  $('btn-mic').classList.add('ouvindo');
-  $('mic-status').textContent = 'Ouvindo... toque novamente para parar';
-});
-
 $('btn-pular-pergunta').addEventListener('click', () => avancarPergunta(true));
 $('btn-confirmar-pergunta').addEventListener('click', () => avancarPergunta(false));
 
 async function avancarPergunta(pular) {
-  pararEscuta();
   const perguntas = coleta.session.perguntas;
   const p = perguntas[coleta.indicePergunta];
   const texto = $('transcricao-texto').value.trim();
