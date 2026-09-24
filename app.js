@@ -825,5 +825,7 @@ function renderRelatorio() {
 
 // PWA
 if ('serviceWorker' in navigator) {
+  const tinhaControlador = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (tinhaControlador) location.reload(); });
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 }
