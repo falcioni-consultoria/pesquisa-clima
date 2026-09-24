@@ -13,6 +13,9 @@ function normalizar(txt) {
 export function parseNota10(textoFalado) {
   const t = normalizar(textoFalado);
   if (!t) return null;
+  // "dou 7" às vezes vem como "2-7": nesse caso vale o número depois do hífen
+  const matchHifen = t.match(/\b\d{1,2}\s*[-–]\s*(10|\d)\b/);
+  if (matchHifen) return parseInt(matchHifen[1], 10);
   const matchDigito = t.match(/\b(10|[0-9])\b/);
   if (matchDigito) return parseInt(matchDigito[1], 10);
   for (const palavra of Object.keys(PALAVRAS_NUMERO)) {

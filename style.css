@@ -77,6 +77,7 @@ h2 { font-size: 18px; margin: 0 0 8px; color: var(--navy); }
   cursor: pointer; transition: transform .05s ease, opacity .15s ease;
 }
 .btn:active { transform: scale(0.98); }
+a.btn { text-decoration: none; display: inline-block; }
 .btn-primario { background: var(--green); color: #fff; }
 .btn-primario:hover { background: var(--green-dark); }
 .btn-secundario { background: #eef1f6; color: var(--navy); }
@@ -97,6 +98,9 @@ h2 { font-size: 18px; margin: 0 0 8px; color: var(--navy); }
 .pesquisa-item-nome { font-weight: 700; color: var(--navy); }
 .pesquisa-item-meta { font-size: 12.5px; color: var(--text-muted); margin-top: 2px; }
 .badge-status { font-size: 11.5px; padding: 3px 9px; border-radius: 20px; font-weight: 700; white-space: nowrap; }
+.editar-texto { width: 100%; margin-top: 10px; border: 1.5px solid var(--border); border-radius: 10px; padding: 10px 12px; font-size: 14.5px; font-family: inherit; }
+.editar-texto:focus { outline: none; border-color: var(--green); }
+.btn-apagar-grande { background: #fdecea; color: var(--danger); }
 .versao { text-align: center; color: var(--text-muted); font-size: 11px; margin-top: 24px; }
 .btn-apagar { background: #fdecea; color: var(--danger); border: none; border-radius: 8px; padding: 7px 12px; font-size: 13px; font-weight: 700; cursor: pointer; }
 .btn-apagar:hover { background: #f9d6d2; }

@@ -6,6 +6,7 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import { NIVEIS, TIPO_LABEL, montarModelo, novaPergunta, SEGMENTOS_PADRAO } from './questions.js';
 import { parseResposta, reconhecimentoDisponivel, criarReconhecedor } from './voice.js';
+import { criarGravador } from './voice-gravacao.js';
 
 const configPendente = firebaseConfig.apiKey === 'COLE_AQUI';
 let db = null;
@@ -16,7 +17,7 @@ if (!configPendente) {
 
 // ---------- helpers de UI ----------
 const $ = (id) => document.getElementById(id);
-const telas = ['tela-config-aviso', 'tela-lista', 'tela-nova', 'tela-coleta', 'tela-relatorio'];
+const telas = ['tela-config-aviso', 'tela-lista', 'tela-nova', 'tela-coleta', 'tela-relatorio', 'tela-editar'];
 
 function mostrarTela(id) {
   telas.forEach((t) => $(t).classList.toggle('hidden', t !== id));
@@ -96,6 +97,7 @@ function rotear() {
   if (rota === 'nova') return telaNova();
   if (rota === 'coleta' && param) return telaColeta(param);
   if (rota === 'relatorio' && param) return telaRelatorio(param);
+  if (rota === 'editar' && param) return telaEditar(param);
   return telaLista();
 }
 
@@ -420,9 +422,9 @@ function mostrarPergunta() {
     if (p.tipo !== 'aberta' && cache.valor !== undefined) selecionarValor(cache.valor);
   }
 
-  $('voz-nao-suportada').classList.toggle('hidden', reconhecimentoDisponivel());
-  $('btn-mic').disabled = !reconhecimentoDisponivel();
+  atualizarBotoesVoz();
   $('mic-status').textContent = 'Toque no microfone e deixe o cliente responder';
+  if (modoVoz === 'gravacao') garantirGravador().precarregar();
 }
 
 function voltarPergunta() {
@@ -469,6 +471,12 @@ function selecionarValor(valor) {
 
 // microfone
 function pararEscuta() {
+  if (coleta.gravando) {
+    if (coleta.gravador) coleta.gravador.cancelar();
+    coleta.gravando = false;
+    $('btn-mic')?.classList.remove('ouvindo');
+    $('mic-nivel')?.classList.add('hidden');
+  }
   const estavaOuvindo = coleta.ouvindo;
   if (coleta.reconhecedor && coleta.ouvindo) coleta.reconhecedor.stop();
   coleta.ouvindo = false;
@@ -498,7 +506,103 @@ $('btn-reforco').addEventListener('click', () => {
   toast(reforcoVoz ? 'Reforço ligado — vale a partir da próxima gravação.' : 'Reforço desligado.');
 });
 
+function lerModoVoz() {
+  try { return localStorage.getItem('falclima_modo_voz') === 'gravacao' ? 'gravacao' : 'vivo'; } catch (e) { return 'vivo'; }
+}
+let modoVoz = lerModoVoz();
+
+function atualizarBotoesVoz() {
+  $('btn-modo-voz').textContent = modoVoz === 'gravacao'
+    ? '🎙 Modo: gravação (mais preciso, transcreve ao parar) — trocar'
+    : '🎙 Modo: ao vivo (rápido) — trocar para gravação';
+  $('btn-reforco').classList.toggle('hidden', modoVoz === 'gravacao');
+  $('btn-mic').disabled = modoVoz === 'vivo' && !reconhecimentoDisponivel();
+  $('voz-nao-suportada').classList.toggle('hidden', modoVoz === 'gravacao' || reconhecimentoDisponivel());
+}
+
+$('btn-modo-voz').addEventListener('click', () => {
+  pararEscuta();
+  modoVoz = modoVoz === 'vivo' ? 'gravacao' : 'vivo';
+  try { localStorage.setItem('falclima_modo_voz', modoVoz); } catch (e) { /* sem storage */ }
+  atualizarBotoesVoz();
+  if (modoVoz === 'gravacao') {
+    garantirGravador().precarregar();
+    toast('Modo gravação: grave a resposta, toque para parar e aguarde a transcrição. Na primeira vez baixa o modelo de voz (precisa de internet).');
+  }
+});
+
+function garantirGravador() {
+  if (!coleta.gravador) {
+    coleta.gravador = criarGravador({
+      onNivel: ({ nivel, baixo }) => {
+        if (!coleta.gravando) return;
+        $('mic-nivel').classList.remove('hidden');
+        $('mic-nivel-barra').style.width = `${Math.round(nivel * 100)}%`;
+        $('mic-nivel-barra').classList.toggle('baixo', baixo);
+        $('mic-status').textContent = baixo ? 'Voz baixa — aproxime o microfone do cliente' : 'Gravando... toque novamente para parar';
+      },
+      onModelo: (pct) => {
+        if (coleta.gravando || coleta.transcrevendo || modoVoz !== 'gravacao') return;
+        $('mic-status').textContent = pct < 100
+          ? `Preparando a voz... ${pct}% (só na primeira vez)`
+          : 'Voz pronta. Toque no microfone e deixe o cliente responder';
+      },
+    });
+  }
+  return coleta.gravador;
+}
+
+function definirBotoesOcupados(ocupado) {
+  $('btn-confirmar-pergunta').disabled = ocupado;
+  $('btn-pular-pergunta').disabled = ocupado;
+  $('btn-anterior-pergunta').disabled = ocupado || coleta.indicePergunta === 0;
+  $('btn-mic').disabled = ocupado;
+}
+
+async function micGravacao() {
+  if (coleta.transcrevendo) return;
+  const g = garantirGravador();
+  if (coleta.gravando) {
+    coleta.gravando = false;
+    $('btn-mic').classList.remove('ouvindo');
+    $('mic-nivel').classList.add('hidden');
+    const p = coleta.session.perguntas[coleta.indicePergunta];
+    coleta.transcrevendo = true;
+    definirBotoesOcupados(true);
+    $('mic-status').textContent = 'Transcrevendo... aguarde';
+    try {
+      const audio = await g.parar();
+      if (!audio) { $('mic-status').textContent = 'Não captei áudio — aproxime o microfone e grave de novo.'; return; }
+      const texto = await g.transcrever(audio);
+      if (!texto) { $('mic-status').textContent = 'Não entendi nada — grave de novo.'; return; }
+      const base = coleta.textoBase;
+      $('transcricao-texto').value = base ? `${base} ${texto}` : texto;
+      if (p && p.tipo !== 'aberta') {
+        const valor = parseResposta(texto, p.tipo);
+        if (valor !== null) selecionarValor(valor);
+      }
+      $('mic-status').textContent = 'Pronto. Confira a nota e toque no microfone para acrescentar algo.';
+    } catch (e) {
+      $('mic-status').textContent = 'Não consegui transcrever — verifique a internet (o modelo de voz baixa na primeira vez).';
+    } finally {
+      coleta.transcrevendo = false;
+      definirBotoesOcupados(false);
+    }
+    return;
+  }
+  try {
+    coleta.textoBase = $('transcricao-texto').value.trim();
+    await g.iniciar();
+    coleta.gravando = true;
+    $('btn-mic').classList.add('ouvindo');
+    $('mic-status').textContent = 'Gravando... toque novamente para parar';
+  } catch (e) {
+    $('mic-status').textContent = 'Microfone bloqueado — libere o acesso ao microfone no navegador.';
+  }
+}
+
 $('btn-mic').addEventListener('click', () => {
+  if (modoVoz === 'gravacao') { micGravacao(); return; }
   if (!reconhecimentoDisponivel()) return;
   if (coleta.ouvindo) { pararEscuta(); return; }
 
@@ -585,7 +689,28 @@ async function avancarPergunta(pular) {
 // ---------- tela: relatório ----------
 let relatorioUnsub = null;
 let relatorioSession = null;
+let relatorioSessionId = null;
 let relatorioRespondentes = [];
+
+function temResposta(r) {
+  return Object.keys(r.respostas || {}).length > 0 || Object.keys(r.abertas || {}).length > 0;
+}
+
+function respondentesFiltrados(filtro) {
+  const comResposta = relatorioRespondentes.filter(temResposta);
+  return filtro ? comResposta.filter((r) => r.segmento === filtro) : comResposta;
+}
+
+$('btn-reabrir').addEventListener('click', async () => {
+  if (!relatorioSessionId) return;
+  try {
+    await updateDoc(doc(db, 'sessions', relatorioSessionId), { status: 'aberta', encerradoEm: null });
+  } catch (e) {
+    toast('Sem conexão — tente reabrir novamente.');
+    return;
+  }
+  location.hash = `#/coleta/${relatorioSessionId}`;
+});
 
 async function telaRelatorio(sessionId) {
   mostrarTela('tela-relatorio');
@@ -605,6 +730,9 @@ async function telaRelatorio(sessionId) {
   $('topbar-subtitle').textContent = 'Relatório em tempo real';
   $('relatorio-titulo').textContent = `Relatório — ${relatorioSession.clienteNome}`;
   atualizarLogoTopbar(relatorioSession.logo);
+  relatorioSessionId = sessionId;
+  $('link-editar').href = `#/editar/${sessionId}`;
+  $('btn-reabrir').classList.toggle('hidden', relatorioSession.status !== 'encerrada');
   const linkForms = $('link-forms');
   if (relatorioSession.formsUrl) {
     linkForms.href = relatorioSession.formsUrl;
@@ -654,7 +782,7 @@ async function gerarPPT() {
     const GRAY = '6B7686';
 
     const filtro = $('filtro-segmento').value;
-    const respondentes = filtro ? relatorioRespondentes.filter((r) => r.segmento === filtro) : relatorioRespondentes;
+    const respondentes = respondentesFiltrados(filtro);
 
     const pptx = new window.PptxGenJS();
     pptx.defineLayout({ name: 'FALCLIMA', width: 10, height: 5.63 });
@@ -719,7 +847,7 @@ async function gerarPPT() {
 
 function renderRelatorio() {
   const filtro = $('filtro-segmento').value;
-  const respondentes = filtro ? relatorioRespondentes.filter((r) => r.segmento === filtro) : relatorioRespondentes;
+  const respondentes = respondentesFiltrados(filtro);
   $('resumo-total-respondentes').textContent = respondentes.length;
 
   const cont = $('relatorio-perguntas');
@@ -823,6 +951,171 @@ function renderRelatorio() {
 
     cont.appendChild(card);
   });
+}
+
+// ---------- tela: editar histórico ----------
+const editar = { sessionId: null, session: null, itens: [] };
+
+async function telaEditar(sessionId) {
+  mostrarTela('tela-editar');
+  $('editar-lista').classList.remove('hidden');
+  $('editar-detalhe').classList.add('hidden');
+  let sSnap;
+  let rSnap;
+  try {
+    sSnap = await getDoc(doc(db, 'sessions', sessionId));
+    rSnap = await getDocs(query(collection(db, 'sessions', sessionId, 'respondentes'), orderBy('seq')));
+  } catch (e) {
+    toast('Sem conexão com o Firebase. Verifique a internet e tente novamente.');
+    location.hash = '#/'; return;
+  }
+  if (!sSnap.exists()) { toast('Pesquisa não encontrada.'); location.hash = '#/'; return; }
+  editar.sessionId = sessionId;
+  editar.session = sSnap.data();
+  editar.itens = rSnap.docs.map((d) => ({ ref: d.ref, ...d.data() }));
+  $('topbar-title').textContent = editar.session.clienteNome;
+  $('topbar-subtitle').textContent = 'Editar respostas';
+  $('editar-titulo').textContent = `Editar — ${editar.session.clienteNome}`;
+  $('link-editar-relatorio').href = `#/relatorio/${sessionId}`;
+  atualizarLogoTopbar(editar.session.logo);
+  renderListaEditar();
+}
+
+function renderListaEditar() {
+  $('editar-lista').classList.remove('hidden');
+  $('editar-detalhe').classList.add('hidden');
+  const cont = $('editar-lista');
+  cont.innerHTML = '';
+  if (!editar.itens.length) {
+    cont.innerHTML = '<p class="texto-vazio">Nenhum respondente ainda.</p>';
+    return;
+  }
+  const total = (editar.session.perguntas || []).length;
+  editar.itens.forEach((r) => {
+    const respondidas = Object.keys(r.respostas || {}).length + Object.keys(r.abertas || {}).length;
+    const item = document.createElement('div');
+    item.className = 'pesquisa-item';
+    item.innerHTML = `
+      <div class="pesquisa-item-info">
+        <div class="pesquisa-item-nome">Respondente ${r.seq}${r.segmento ? ' · ' + escapeHtml(r.segmento) : ''}</div>
+        <div class="pesquisa-item-meta">${respondidas} de ${total} respondidas</div>
+      </div>
+      <span class="badge-status badge-encerrada">Editar</span>
+    `;
+    item.addEventListener('click', () => abrirEdicao(r));
+    cont.appendChild(item);
+  });
+}
+
+function abrirEdicao(r) {
+  const perguntas = editar.session.perguntas || [];
+  const draft = { segmento: r.segmento || '', valores: {}, textos: {}, abertas: { ...(r.abertas || {}) } };
+  perguntas.forEach((p) => {
+    const atual = (r.respostas || {})[p.id];
+    if (atual && typeof atual.valor === 'number') draft.valores[p.id] = atual.valor;
+    draft.textos[p.id] = (atual && atual.texto) || '';
+  });
+
+  const det = $('editar-detalhe');
+  det.innerHTML = '';
+  $('editar-lista').classList.add('hidden');
+  det.classList.remove('hidden');
+  window.scrollTo(0, 0);
+
+  const segmentos = [...(editar.session.segmentos || [])];
+  if (draft.segmento && !segmentos.includes(draft.segmento)) segmentos.push(draft.segmento);
+  const topo = document.createElement('div');
+  topo.className = 'card';
+  topo.innerHTML = `
+    <h2>Respondente ${r.seq}</h2>
+    <label class="campo"><span>Setor / segmento</span>
+      <select>
+        <option value="">(sem segmento)</option>
+        ${segmentos.map((s) => `<option value="${escapeHtml(s)}" ${s === draft.segmento ? 'selected' : ''}>${escapeHtml(s)}</option>`).join('')}
+      </select>
+    </label>`;
+  topo.querySelector('select').addEventListener('change', (e) => { draft.segmento = e.target.value; });
+  det.appendChild(topo);
+
+  perguntas.forEach((p, idx) => {
+    const bloco = document.createElement('div');
+    bloco.className = 'card';
+    bloco.innerHTML = `<div class="pergunta-relatorio-titulo">${idx + 1}. ${escapeHtml(p.texto)}</div>`;
+
+    if (p.tipo === 'aberta') {
+      const ta = document.createElement('textarea');
+      ta.rows = 3;
+      ta.className = 'editar-texto';
+      ta.value = draft.abertas[p.id] || '';
+      ta.addEventListener('input', () => { draft.abertas[p.id] = ta.value; });
+      bloco.appendChild(ta);
+    } else {
+      const opcoes = p.tipo === 'nota10'
+        ? Array.from({ length: 11 }, (_, i) => ({ valor: i, label: String(i) }))
+        : NIVEIS[p.tipo].map((label, i) => ({ valor: i + 1, label }));
+      const grade = document.createElement('div');
+      grade.className = p.tipo === 'nota10' ? 'resposta-nota10' : 'resposta-likert';
+      const botoes = opcoes.map((o) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = p.tipo === 'nota10' ? 'nota-btn' : 'likert-btn';
+        b.textContent = o.label;
+        b.addEventListener('click', () => {
+          if (draft.valores[p.id] === o.valor) delete draft.valores[p.id]; else draft.valores[p.id] = o.valor;
+          marcar();
+        });
+        grade.appendChild(b);
+        return b;
+      });
+      const marcar = () => botoes.forEach((b, i) => b.classList.toggle('selecionado', draft.valores[p.id] === opcoes[i].valor));
+      marcar();
+      bloco.appendChild(grade);
+      const ta = document.createElement('textarea');
+      ta.rows = 2;
+      ta.className = 'editar-texto';
+      ta.placeholder = 'Comentário (opcional)';
+      ta.value = draft.textos[p.id] || '';
+      ta.addEventListener('input', () => { draft.textos[p.id] = ta.value; });
+      bloco.appendChild(ta);
+    }
+    det.appendChild(bloco);
+  });
+
+  const acoes = document.createElement('div');
+  acoes.className = 'coleta-acoes';
+  acoes.innerHTML = `
+    <button type="button" class="btn btn-secundario" data-acao="voltar">← Voltar</button>
+    <button type="button" class="btn btn-apagar-grande" data-acao="apagar">Apagar respondente</button>
+    <button type="button" class="btn btn-primario" data-acao="salvar">Salvar alterações</button>`;
+  acoes.querySelector('[data-acao="voltar"]').addEventListener('click', renderListaEditar);
+  acoes.querySelector('[data-acao="apagar"]').addEventListener('click', async () => {
+    if (!confirm(`Apagar o Respondente ${r.seq} e todas as respostas dele?\n\nNão dá para desfazer.`)) return;
+    try {
+      await deleteDoc(r.ref);
+    } catch (e) { toast('Não foi possível apagar. Verifique a conexão.'); return; }
+    editar.itens = editar.itens.filter((x) => x !== r);
+    toast('Respondente apagado.');
+    renderListaEditar();
+  });
+  acoes.querySelector('[data-acao="salvar"]').addEventListener('click', async () => {
+    const respostas = {};
+    const abertas = {};
+    perguntas.forEach((p) => {
+      if (p.tipo === 'aberta') {
+        const t = (draft.abertas[p.id] || '').trim();
+        if (t) abertas[p.id] = t;
+      } else if (typeof draft.valores[p.id] === 'number') {
+        respostas[p.id] = { valor: draft.valores[p.id], texto: (draft.textos[p.id] || '').trim() };
+      }
+    });
+    try {
+      await updateDoc(r.ref, { segmento: draft.segmento || null, respostas, abertas });
+    } catch (e) { toast('Sem conexão — as alterações não foram salvas.'); return; }
+    Object.assign(r, { segmento: draft.segmento || null, respostas, abertas });
+    toast('Alterações salvas.');
+    renderListaEditar();
+  });
+  det.appendChild(acoes);
 }
 
 // PWA

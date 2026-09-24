@@ -1,5 +1,5 @@
-const CACHE = 'pesquisa-clima-v6';
-const ARQUIVOS = ['./index.html', './style.css', './app.js', './questions.js', './voice.js', './firebase-config.js', './manifest.json', './icons/falcioni-mark.png'];
+const CACHE = 'pesquisa-clima-v7';
+const ARQUIVOS = ['./index.html', './style.css', './app.js', './questions.js', './voice.js', './firebase-config.js', './manifest.json', './icons/falcioni-mark.png', './voice-gravacao.js', './whisper-worker.js'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ARQUIVOS)));
@@ -17,7 +17,7 @@ self.addEventListener('activate', (event) => {
 // então evitamos servir versão antiga do app preferindo sempre a rede quando disponível.
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
-  if (event.request.url.includes('firestore.googleapis.com') || event.request.url.includes('gstatic.com')) return;
+  if (new URL(event.request.url).origin !== self.location.origin) return;
   event.respondWith(
     fetch(event.request, { cache: 'no-cache' })
       .then((resp) => {
