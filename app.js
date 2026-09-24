@@ -6,7 +6,7 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import { NIVEIS, TIPO_LABEL, montarModelo, novaPergunta, SEGMENTOS_PADRAO } from './questions.js';
 import { parseResposta, reconhecimentoDisponivel, criarReconhecedor } from './voice.js';
-import { criarGravador } from './voice-gravacao.js';
+import { criarGravador, chaveNuvem, salvarChaveNuvem } from './voice-gravacao.js';
 
 const configPendente = firebaseConfig.apiKey === 'COLE_AQUI';
 let db = null;
@@ -516,6 +516,10 @@ function atualizarBotoesVoz() {
     ? '🎙 Modo: gravação (mais preciso, transcreve ao parar) — trocar'
     : '🎙 Modo: ao vivo (rápido) — trocar para gravação';
   $('btn-reforco').classList.toggle('hidden', modoVoz === 'gravacao');
+  $('btn-nuvem').classList.toggle('hidden', modoVoz !== 'gravacao');
+  $('btn-nuvem').textContent = chaveNuvem()
+    ? '☁️ Transcrição na nuvem (mais precisa): ligada — trocar chave'
+    : '☁️ Transcrição na nuvem (mais precisa): desligada — ativar';
   $('btn-mic').disabled = modoVoz === 'vivo' && !reconhecimentoDisponivel();
   $('voz-nao-suportada').classList.toggle('hidden', modoVoz === 'gravacao' || reconhecimentoDisponivel());
 }
@@ -530,6 +534,26 @@ $('btn-modo-voz').addEventListener('click', () => {
     toast('Modo gravação: grave a resposta, toque para parar e aguarde a transcrição. Na primeira vez baixa o modelo de voz (precisa de internet).');
   }
 });
+
+$('btn-nuvem').addEventListener('click', () => {
+  const atual = chaveNuvem();
+  const nova = prompt(
+    'Cole a chave da OpenAI (começa com sk-) para usar a transcrição na nuvem.\n' +
+    'Ela fica salva só neste aparelho. Deixe vazio e confirme para desligar.',
+    atual,
+  );
+  if (nova === null) return;
+  salvarChaveNuvem(nova.trim());
+  atualizarBotoesVoz();
+  toast(nova.trim() ? 'Transcrição na nuvem ligada.' : 'Transcrição na nuvem desligada (usa a local).');
+});
+
+function dicaTranscricao(p) {
+  if (!p) return '';
+  if (p.tipo === 'nota10') return 'Resposta a uma pergunta com nota de zero a dez. Exemplo: "Dou sete, porque as ferramentas ajudam."';
+  if (p.tipo === 'aberta') return 'Comentário de um colaborador sobre o ambiente de trabalho.';
+  return `Resposta a uma pergunta de múltipla escolha: ${(NIVEIS[p.tipo] || []).join(', ')}.`;
+}
 
 function garantirGravador() {
   if (!coleta.gravador) {
@@ -573,7 +597,7 @@ async function micGravacao() {
     try {
       const audio = await g.parar();
       if (!audio) { $('mic-status').textContent = 'Não captei áudio — aproxime o microfone e grave de novo.'; return; }
-      const texto = await g.transcrever(audio);
+      const texto = await g.transcrever(audio, dicaTranscricao(p));
       if (!texto) { $('mic-status').textContent = 'Não entendi nada — grave de novo.'; return; }
       const base = coleta.textoBase;
       $('transcricao-texto').value = base ? `${base} ${texto}` : texto;
@@ -583,7 +607,11 @@ async function micGravacao() {
       }
       $('mic-status').textContent = 'Pronto. Confira a nota e toque no microfone para acrescentar algo.';
     } catch (e) {
-      $('mic-status').textContent = 'Não consegui transcrever — verifique a internet (o modelo de voz baixa na primeira vez).';
+      $('mic-status').textContent = e.message === 'chave-invalida'
+        ? 'A chave da OpenAI não foi aceita — confira ou toque em "Transcrição na nuvem" para trocar.'
+        : e.message === 'sem-credito'
+          ? 'A conta da OpenAI está sem crédito ou no limite — confira o saldo.'
+          : 'Não consegui transcrever — verifique a internet (o modelo de voz baixa na primeira vez).';
     } finally {
       coleta.transcrevendo = false;
       definirBotoesOcupados(false);

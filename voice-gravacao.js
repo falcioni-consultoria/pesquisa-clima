@@ -18,6 +18,49 @@ async function decodificar(blob) {
   }
 }
 
+export function chaveNuvem() {
+  try { return localStorage.getItem('falclima_openai_key') || ''; } catch (e) { return ''; }
+}
+
+export function salvarChaveNuvem(chave) {
+  try {
+    if (chave) localStorage.setItem('falclima_openai_key', chave); else localStorage.removeItem('falclima_openai_key');
+  } catch (e) { /* sem storage */ }
+}
+
+function paraWav(x, taxa) {
+  const buf = new ArrayBuffer(44 + x.length * 2);
+  const v = new DataView(buf);
+  const txt = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  txt(0, 'RIFF'); v.setUint32(4, 36 + x.length * 2, true); txt(8, 'WAVE'); txt(12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, taxa, true); v.setUint32(28, taxa * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  txt(36, 'data'); v.setUint32(40, x.length * 2, true);
+  for (let i = 0; i < x.length; i++) v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, x[i])) * 0x7fff, true);
+  return buf;
+}
+
+// Transcrição na nuvem (OpenAI): a mais precisa. Só roda se houver chave salva neste aparelho.
+async function transcreverNuvem(audio, chave, dica) {
+  const wav = paraWav(audio, 16000);
+  for (const modelo of ['gpt-4o-transcribe', 'whisper-1']) {
+    const fd = new FormData();
+    fd.append('file', new Blob([wav], { type: 'audio/wav' }), 'audio.wav');
+    fd.append('model', modelo);
+    fd.append('language', 'pt');
+    fd.append('temperature', '0');
+    if (dica) fd.append('prompt', dica);
+    const r = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST', headers: { Authorization: `Bearer ${chave}` }, body: fd,
+    });
+    if (r.status === 401) throw new Error('chave-invalida');
+    if (r.status === 429) throw new Error('sem-credito');
+    if (r.ok) return ((await r.json()).text || '').trim();
+    if (r.status !== 400 && r.status !== 404) throw new Error('nuvem-' + r.status);
+  }
+  throw new Error('nuvem-indisponivel');
+}
+
 export function criarGravador({ onNivel, onModelo }) {
   const worker = new Worker('whisper-worker.js', { type: 'module' });
   const pendentes = new Map();
@@ -98,12 +141,26 @@ export function criarGravador({ onNivel, onModelo }) {
       limpar();
     },
 
-    transcrever(audio) {
-      const id = ++seq;
-      return new Promise((res, rej) => {
-        pendentes.set(id, { res, rej });
-        worker.postMessage({ tipo: 'transcrever', id, audio }, [audio.buffer]);
-      });
+    async transcrever(audio, dica) {
+      const chave = chaveNuvem();
+      if (chave) {
+        try {
+          return await transcreverNuvem(audio, chave, dica);
+        } catch (e) {
+          if (e.message === 'chave-invalida' || e.message === 'sem-credito') throw e;
+          // sem internet ou falha da nuvem: cai para a transcrição local
+        }
+      }
+      return transcreverLocal(audio);
     },
+
   };
+
+  function transcreverLocal(audio) {
+    const id = ++seq;
+    return new Promise((res, rej) => {
+      pendentes.set(id, { res, rej });
+      worker.postMessage({ tipo: 'transcrever', id, audio }, [audio.buffer]);
+    });
+  }
 }
