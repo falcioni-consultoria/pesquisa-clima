@@ -482,7 +482,7 @@ function lerReforcoVoz() {
     const v = localStorage.getItem('falclima_reforco');
     if (v !== null) return v === '1';
   } catch (e) { /* sem storage */ }
-  return !/Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
+  return false;
 }
 let reforcoVoz = lerReforcoVoz();
 
@@ -519,13 +519,15 @@ $('btn-mic').addEventListener('click', () => {
         $('mic-nivel').classList.remove('hidden');
         $('mic-nivel-barra').style.width = `${Math.round(nivel * 100)}%`;
         $('mic-nivel-barra').classList.toggle('baixo', baixo);
-        $('mic-status').textContent = baixo ? 'Voz baixa — aproxime o microfone do cliente' : 'Ouvindo... toque novamente para parar';
+        $('mic-status').textContent = baixo ? 'Voz baixa — aproxime o microfone ou aumente o volume de entrada do computador' : 'Ouvindo... toque novamente para parar';
       },
       onErro: (err) => {
         pararEscuta();
         $('mic-status').textContent = err === 'not-allowed' || err === 'service-not-allowed'
           ? 'Microfone bloqueado — libere o acesso ao microfone no navegador.'
-          : `Erro no microfone (${err})`;
+          : err === 'falha-audio' || err === 'audio-capture'
+            ? 'Não consegui ouvir o microfone — confira se é o microfone certo e se a internet está ativa.'
+            : `Erro no microfone (${err})`;
       },
       onFim: () => { pararEscuta(); },
     });

@@ -166,7 +166,9 @@ export function criarReconhecedor({ onTranscricao, onErro, onFim, onNivel, refor
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const resultado = event.results[i];
         if (resultado.isFinal) {
-          transcricaoFinal += (transcricaoFinal ? ' ' : '') + resultado[0].transcript.trim();
+          const novo = resultado[0].transcript.trim();
+          if (!novo || transcricaoFinal.endsWith(novo)) continue;
+          transcricaoFinal = novo.startsWith(transcricaoFinal) ? novo : (transcricaoFinal + ' ' + novo).trim();
         } else {
           interim += resultado[0].transcript;
         }
@@ -176,7 +178,7 @@ export function criarReconhecedor({ onTranscricao, onErro, onFim, onNivel, refor
     };
 
     rec.onerror = (event) => {
-      if (event.error === 'no-speech' || event.error === 'aborted') return;
+      if (event.error === 'no-speech' || event.error === 'aborted' || event.error === 'network') return;
       querOuvir = false;
       onErro && onErro(event.error);
     };
@@ -190,7 +192,7 @@ export function criarReconhecedor({ onTranscricao, onErro, onFim, onNivel, refor
       if (querOuvir) {
         if (Date.now() - inicioRec < 500) falhasRapidas++;
         if (falhasRapidas >= 5) { querOuvir = false; onErro && onErro('falha-audio'); encerrar(); return; }
-        setTimeout(() => { if (querOuvir) iniciarRec(); else encerrar(); }, 150);
+        setTimeout(() => { if (querOuvir) iniciarRec(); else encerrar(); }, 0);
         return;
       }
       encerrar();
