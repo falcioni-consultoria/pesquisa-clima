@@ -7,6 +7,7 @@ import {
 import { NIVEIS, TIPO_LABEL, montarModelo, novaPergunta, SEGMENTOS_PADRAO } from './questions.js';
 import { parseResposta, reconhecimentoDisponivel, criarReconhecedor } from './voice.js';
 import { criarGravador, chaveNuvem, salvarChaveNuvem, wavBlob } from './voice-gravacao.js';
+import { carregarCorretor, ativarAutocorrecao, autocorrecaoLigada, definirAutocorrecao, desfazerCorrecao } from './autocorrecao.js';
 
 const configPendente = firebaseConfig.apiKey === 'COLE_AQUI';
 let db = null;
@@ -423,6 +424,8 @@ function mostrarPergunta() {
   }
 
   atualizarBotoesVoz();
+  correcoesRecentes.length = 0;
+  renderCorrecoes();
   $('audio-replay').classList.add('hidden');
   $('mic-status').textContent = 'Toque no microfone e deixe o cliente responder';
   if (modoVoz === 'gravacao' && !chaveNuvem()) garantirGravador().precarregar();
@@ -469,6 +472,46 @@ function selecionarValor(valor) {
   document.querySelectorAll('#resposta-nota10 .nota-btn').forEach((b, i) => b.classList.toggle('selecionado', i === valor));
   document.querySelectorAll('#resposta-likert .likert-btn').forEach((b, i) => b.classList.toggle('selecionado', i === valor - 1));
 }
+
+// ---------- autocorreção da digitação ----------
+const correcoesRecentes = [];
+
+function renderCorrecoes() {
+  const cont = $('correcoes');
+  cont.innerHTML = '';
+  correcoesRecentes.forEach((c) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip-correcao';
+    b.title = 'Toque para desfazer esta correção';
+    b.textContent = `${c.original} → ${c.corrigido}  ✕`;
+    b.addEventListener('click', () => {
+      desfazerCorrecao($('transcricao-texto'), c);
+      correcoesRecentes.splice(correcoesRecentes.indexOf(c), 1);
+      renderCorrecoes();
+    });
+    cont.appendChild(b);
+  });
+}
+
+function atualizarBotaoAutocorrecao() {
+  $('btn-autocorrecao').textContent = `✍️ Autocorreção da digitação: ${autocorrecaoLigada() ? 'ligada' : 'desligada'}`;
+}
+
+$('btn-autocorrecao').addEventListener('click', () => {
+  definirAutocorrecao(!autocorrecaoLigada());
+  atualizarBotaoAutocorrecao();
+});
+
+carregarCorretor();
+atualizarBotaoAutocorrecao();
+ativarAutocorrecao($('transcricao-texto'), {
+  onCorrecao: (c) => {
+    correcoesRecentes.unshift(c);
+    if (correcoesRecentes.length > 6) correcoesRecentes.pop();
+    renderCorrecoes();
+  },
+});
 
 // microfone
 function pararEscuta() {

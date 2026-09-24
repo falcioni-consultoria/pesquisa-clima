@@ -261,3 +261,9 @@ a.btn { text-decoration: none; display: inline-block; }
 }
 
 .audio-replay { width: 100%; margin: 4px 0 12px; }
+
+.correcoes { display: flex; flex-wrap: wrap; gap: 6px; margin: -6px 0 8px; }
+.chip-correcao { background: #fff6e0; border: 1px solid #f0d9a0; color: #7a5a00; border-radius: 16px; padding: 4px 10px; font-size: 12.5px; cursor: pointer; }
+.chip-correcao:hover { background: #ffefc2; }
+
+#btn-autocorrecao { display: block; margin: 2px 0 12px; }

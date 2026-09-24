@@ -1,0 +1,6 @@
+dicionario-pt.txt e derivado da lista de frequencia de palavras do portugues do Brasil
+FrequencyWords (Hermit Dave) - https://github.com/hermitdave/FrequencyWords
+baseada em legendas do OpenSubtitles. Licenca do conteudo: CC BY-SA 4.0
+https://creativecommons.org/licenses/by-sa/4.0/
+Alteracoes: filtrado (palavras com 25+ ocorrencias, so letras) e removidas formas sem acento
+que sao erros comuns de digitacao. Este arquivo continua sob CC BY-SA 4.0.
