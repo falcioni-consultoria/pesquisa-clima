@@ -12,6 +12,8 @@
 </head>
 <body>
 
+<div id="status-rede" class="status-rede hidden">Sem internet — as respostas estão sendo guardadas neste aparelho e serão enviadas quando a conexão voltar.</div>
+
 <header class="topbar">
   <div class="topbar-left">
     <button id="btn-voltar" class="btn-icon" title="Voltar" hidden>←</button>
@@ -48,7 +50,7 @@
     </div>
     <div id="lista-pesquisas" class="lista-pesquisas"></div>
     <p id="lista-vazia" class="texto-vazio hidden">Nenhuma pesquisa criada ainda. Toque em "Nova pesquisa" para começar.</p>
-    <p class="versao">Falclima · versão 12</p>
+    <p class="versao">Falclima · versão 13</p>
   </section>
 
   <!-- Nova pesquisa -->
@@ -120,6 +122,7 @@
 
     <div class="coleta-status">
       <span id="coleta-respondente-label">Respondente 1</span>
+      <button id="btn-ver-respondidos" class="btn btn-secundario btn-pequeno">📋 Voltar às respondidas</button>
       <button id="btn-encerrar-pesquisa" class="btn-link">Encerrar pesquisa</button>
     </div>
 
@@ -165,8 +168,12 @@
     <div class="tela-header">
       <h1 id="editar-titulo">Editar respostas</h1>
       <div class="tela-header-acoes">
+        <button id="btn-editar-coletar" class="btn btn-primario">▶ Continuar coletando</button>
         <a id="link-editar-relatorio" class="btn btn-secundario" href="#">Ver relatório</a>
       </div>
+    </div>
+    <div id="editar-acoes-lista" class="editar-acoes-lista">
+      <button id="btn-limpar-vazios" class="btn btn-apagar-grande btn-pequeno hidden"></button>
     </div>
     <div id="editar-lista" class="lista-pesquisas"></div>
     <div id="editar-detalhe" class="hidden"></div>

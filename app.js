@@ -1,9 +1,10 @@
 import { firebaseConfig } from './firebase-config.js';
-import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
+import { initializeApp } from './vendor/firebase-app.js';
 import {
-  getFirestore, collection, doc, addDoc, updateDoc, onSnapshot,
-  query, orderBy, serverTimestamp, getDoc, getDocs, increment, deleteDoc,
-} from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+  getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
+  collection, doc, setDoc, updateDoc, onSnapshot, query, orderBy, serverTimestamp,
+  getDoc, getDocs, deleteDoc, waitForPendingWrites,
+} from './vendor/firebase-firestore.js';
 import { NIVEIS, TIPO_LABEL, montarModelo, novaPergunta, SEGMENTOS_PADRAO } from './questions.js';
 import { carregarCorretor, ativarAutocorrecao, autocorrecaoLigada, definirAutocorrecao, desfazerCorrecao } from './autocorrecao.js';
 
@@ -11,7 +12,12 @@ const configPendente = firebaseConfig.apiKey === 'COLE_AQUI';
 let db = null;
 if (!configPendente) {
   const fbApp = initializeApp(firebaseConfig);
-  db = getFirestore(fbApp);
+  try {
+    // guarda tudo no aparelho: funciona sem internet e envia sozinho quando a conexão voltar
+    db = initializeFirestore(fbApp, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) });
+  } catch (e) {
+    db = getFirestore(fbApp);
+  }
 }
 
 // ---------- helpers de UI ----------
@@ -88,13 +94,13 @@ $('btn-voltar').addEventListener('click', () => {
 function rotear() {
   if (configPendente) { mostrarTela('tela-config-aviso'); return; }
   const hash = location.hash.replace(/^#\/?/, '');
-  const [rota, param] = hash.split('/');
+  const [rota, param, param2] = hash.split('/');
   modoGerenciar = false;
   $('btn-gerenciar').textContent = 'Gerenciar histórico';
   if (rota === 'nova') return telaNova();
   if (rota === 'coleta' && param) return telaColeta(param);
   if (rota === 'relatorio' && param) return telaRelatorio(param);
-  if (rota === 'editar' && param) return telaEditar(param);
+  if (rota === 'editar' && param) return telaEditar(param, parseInt(param2, 10) || 0);
   return telaLista();
 }
 
@@ -137,7 +143,7 @@ async function telaLista() {
     });
     item.querySelector('.btn-apagar')?.addEventListener('click', (e) => {
       e.stopPropagation();
-      apagarPesquisa(docSnap.id, s.clienteNome || 'Sem nome');
+      apagarPesquisa(docSnap.id, s.clienteNome || 'Sem nome', item);
     });
     cont.appendChild(item);
   });
@@ -151,17 +157,18 @@ $('btn-gerenciar').addEventListener('click', () => {
   telaLista();
 });
 
-async function apagarPesquisa(id, nome) {
+async function apagarPesquisa(id, nome, itemEl) {
   if (!confirm(`Apagar a pesquisa "${nome}" e todas as respostas dela?\n\nNão dá para desfazer.`)) return;
   try {
     const resp = await getDocs(collection(db, 'sessions', id, 'respondentes'));
-    await Promise.all(resp.docs.map((d) => deleteDoc(d.ref)));
-    await deleteDoc(doc(db, 'sessions', id));
+    resp.docs.forEach((d) => deleteDoc(d.ref).catch(falhaGravar));
+    deleteDoc(doc(db, 'sessions', id)).catch(falhaGravar);
+    itemEl.remove();
+    if (!$('lista-pesquisas').children.length) $('lista-vazia').classList.remove('hidden');
     toast('Pesquisa apagada.');
   } catch (e) {
-    toast('Não foi possível apagar. Verifique a conexão e tente de novo.');
+    toast('Não foi possível apagar agora. Tente de novo.');
   }
-  telaLista();
 }
 
 function escapeHtml(str) {
@@ -267,23 +274,19 @@ $('btn-criar-pesquisa').addEventListener('click', async () => {
 
   const btn = $('btn-criar-pesquisa');
   btn.disabled = true; btn.textContent = 'Criando...';
-  try {
-    const ref = await addDoc(collection(db, 'sessions'), {
-      clienteNome,
-      status: 'aberta',
-      perguntas: perguntasValidas,
-      segmentos,
-      logo: logoDataUrl || null,
-      formsUrl: formsUrl || null,
-      proximoSeq: 1,
-      criadoEm: serverTimestamp(),
-    });
-    location.hash = `#/coleta/${ref.id}`;
-  } catch (e) {
-    toast('Erro ao criar pesquisa: ' + e.message);
-  } finally {
-    btn.disabled = false; btn.textContent = 'Criar pesquisa e começar a coletar';
-  }
+  const ref = doc(collection(db, 'sessions'));
+  setDoc(ref, {
+    clienteNome,
+    status: 'aberta',
+    perguntas: perguntasValidas,
+    segmentos,
+    logo: logoDataUrl || null,
+    formsUrl: formsUrl || null,
+    proximoSeq: 1,
+    criadoEm: serverTimestamp(),
+  }).catch(falhaGravar);
+  btn.disabled = false; btn.textContent = 'Criar pesquisa e começar a coletar';
+  location.hash = `#/coleta/${ref.id}`;
 });
 
 // ---------- tela: coleta ----------
@@ -291,6 +294,7 @@ const coleta = {
   sessionId: null,
   session: null,
   respondenteRef: null,
+  respondenteCriado: false,
   seq: 1,
   segmento: null,
   indicePergunta: 0,
@@ -298,14 +302,38 @@ const coleta = {
   respostasCache: {},
 };
 
+function falhaGravar(e) {
+  toast('Não foi possível salvar: ' + ((e && e.message) || e));
+}
+
+function lerLocal(chave) {
+  try { return JSON.parse(localStorage.getItem(chave) || 'null'); } catch (e) { return null; }
+}
+
+function gravarLocal(chave, valor) {
+  try {
+    if (valor === null) localStorage.removeItem(chave); else localStorage.setItem(chave, JSON.stringify(valor));
+  } catch (e) { /* sem storage */ }
+}
+
+// rascunho da pergunta atual (nota + texto ainda não confirmados): sobrevive a queda de energia
+function salvarRascunho() {
+  if (!coleta.session) return;
+  gravarLocal('falclima_rascunho', {
+    sessionId: coleta.sessionId, seq: coleta.seq, indice: coleta.indicePergunta,
+    valor: coleta.valorAtual, texto: $('transcricao-texto').value,
+  });
+}
+
+function limparRascunho() { gravarLocal('falclima_rascunho', null); }
+
 async function telaColeta(sessionId) {
   mostrarTela('tela-coleta');
-  const sessRef = doc(db, 'sessions', sessionId);
   let snap;
   try {
-    snap = await getDoc(sessRef);
+    snap = await getDoc(doc(db, 'sessions', sessionId));
   } catch (e) {
-    toast('Sem conexão com o Firebase. Verifique a internet e tente novamente.');
+    toast('Esta pesquisa ainda não está guardada neste aparelho. Abra-a uma vez com internet.');
     location.hash = '#/'; return;
   }
   if (!snap.exists()) { toast('Pesquisa não encontrada.'); location.hash = '#/'; return; }
@@ -315,52 +343,81 @@ async function telaColeta(sessionId) {
   $('topbar-subtitle').textContent = 'Coletando respostas';
   atualizarLogoTopbar(coleta.session.logo);
   coleta.seq = coleta.session.proximoSeq || 1;
-  iniciarNovoRespondente();
+  const retomou = await tentarRetomar();
+  if (!retomou) iniciarNovoRespondente();
 }
 
-$('btn-encerrar-pesquisa').addEventListener('click', async () => {
+// depois de queda de energia/fechamento: volta no respondente que estava em andamento
+async function tentarRetomar() {
+  const m = lerLocal('falclima_em_andamento');
+  if (!m || m.sessionId !== coleta.sessionId) return false;
+  const ref = doc(db, 'sessions', coleta.sessionId, 'respondentes', m.id);
+  let snap;
+  try { snap = await getDoc(ref); } catch (e) { return false; }
+  if (!snap.exists() || snap.data().finalizadoEm) { gravarLocal('falclima_em_andamento', null); return false; }
+  const d = snap.data();
+  const perguntas = coleta.session.perguntas;
+  coleta.respondenteRef = ref;
+  coleta.respondenteCriado = true;
+  coleta.seq = d.seq;
+  coleta.segmento = d.segmento || null;
+  coleta.respostasCache = {};
+  perguntas.forEach((p) => {
+    const r = (d.respostas || {})[p.id];
+    if (r && typeof r.valor === 'number') coleta.respostasCache[p.id] = { valor: r.valor, texto: r.texto || '' };
+    else if ((d.abertas || {})[p.id]) coleta.respostasCache[p.id] = { texto: d.abertas[p.id] };
+  });
+  let i = perguntas.findIndex((p) => !coleta.respostasCache[p.id]);
+  if (i < 0) i = perguntas.length - 1;
+  coleta.indicePergunta = i;
+  $('coleta-respondente-label').textContent = `Respondente ${coleta.seq}`;
+  toast(`Retomando o Respondente ${coleta.seq} de onde parou.`);
+  mostrarPergunta();
+  return true;
+}
+
+$('btn-encerrar-pesquisa').addEventListener('click', () => {
   if (!confirm('Encerrar esta pesquisa? Você ainda poderá ver o relatório depois.')) return;
-  try {
-    await updateDoc(doc(db, 'sessions', coleta.sessionId), { status: 'encerrada', encerradoEm: serverTimestamp() });
-  } catch (e) {
-    toast('Sem conexão — tente encerrar novamente em instantes.');
-    return;
-  }
+  updateDoc(doc(db, 'sessions', coleta.sessionId), { status: 'encerrada', encerradoEm: serverTimestamp() }).catch(falhaGravar);
   location.hash = `#/relatorio/${coleta.sessionId}`;
 });
 
-async function iniciarNovoRespondente() {
+$('btn-ver-respondidos').addEventListener('click', () => {
+  if (coleta.sessionId) location.hash = `#/editar/${coleta.sessionId}`;
+});
+
+function iniciarNovoRespondente() {
   coleta.indicePergunta = 0;
   coleta.segmento = null;
   coleta.respostasCache = {};
+  coleta.respondenteCriado = false;
+  coleta.respondenteRef = doc(collection(db, 'sessions', coleta.sessionId, 'respondentes'));
   $('coleta-respondente-label').textContent = `Respondente ${coleta.seq}`;
   const segmentos = coleta.session.segmentos || [];
-
-  let ref;
-  try {
-    ref = await addDoc(collection(db, 'sessions', coleta.sessionId, 'respondentes'), {
-      seq: coleta.seq,
-      segmento: null,
-      respostas: {},
-      abertas: {},
-      criadoEm: serverTimestamp(),
-      finalizadoEm: null,
-    });
-    await updateDoc(doc(db, 'sessions', coleta.sessionId), { proximoSeq: increment(1) });
-  } catch (e) {
-    toast('Sem conexão com o Firebase. Verifique a internet e toque para tentar novamente.');
-    $('bloco-pergunta').classList.add('hidden');
-    $('bloco-segmento').classList.add('hidden');
-    return;
-  }
-  coleta.respondenteRef = ref;
-  coleta.session.proximoSeq = coleta.seq + 1;
-
   if (segmentos.length) {
     mostrarBlocoSegmento(segmentos);
   } else {
     mostrarPergunta();
   }
+}
+
+// o respondente só é criado no banco quando existe a primeira resposta (evita registros vazios)
+function gravarRespondente(dados) {
+  if (!coleta.respondenteCriado) {
+    coleta.respondenteCriado = true;
+    setDoc(coleta.respondenteRef, {
+      seq: coleta.seq,
+      segmento: coleta.segmento || null,
+      respostas: {},
+      abertas: {},
+      criadoEm: serverTimestamp(),
+      finalizadoEm: null,
+    }).catch(falhaGravar);
+    updateDoc(doc(db, 'sessions', coleta.sessionId), { proximoSeq: coleta.seq + 1 }).catch(falhaGravar);
+    coleta.session.proximoSeq = coleta.seq + 1;
+    gravarLocal('falclima_em_andamento', { sessionId: coleta.sessionId, id: coleta.respondenteRef.id, seq: coleta.seq });
+  }
+  updateDoc(coleta.respondenteRef, dados).catch(falhaGravar);
 }
 
 function mostrarBlocoSegmento(segmentos) {
@@ -372,9 +429,9 @@ function mostrarBlocoSegmento(segmentos) {
     const chip = document.createElement('button');
     chip.className = 'chip';
     chip.textContent = seg;
-    chip.addEventListener('click', async () => {
+    chip.addEventListener('click', () => {
       coleta.segmento = seg;
-      try { await updateDoc(coleta.respondenteRef, { segmento: seg }); } catch (e) { /* segue mesmo assim, tenta de novo nas próximas respostas */ }
+      if (coleta.respondenteCriado) gravarRespondente({ segmento: seg });
       mostrarPergunta();
     });
     cont.appendChild(chip);
@@ -382,6 +439,7 @@ function mostrarBlocoSegmento(segmentos) {
 }
 
 $('btn-pular-segmento').addEventListener('click', () => mostrarPergunta());
+
 
 function mostrarPergunta() {
   $('bloco-segmento').classList.add('hidden');
@@ -413,6 +471,12 @@ function mostrarPergunta() {
   if (cache) {
     $('transcricao-texto').value = cache.texto || '';
     if (p.tipo !== 'aberta' && cache.valor !== undefined) selecionarValor(cache.valor);
+  } else {
+    const rasc = lerLocal('falclima_rascunho');
+    if (rasc && rasc.sessionId === coleta.sessionId && rasc.seq === coleta.seq && rasc.indice === coleta.indicePergunta) {
+      $('transcricao-texto').value = rasc.texto || '';
+      if (p.tipo !== 'aberta' && typeof rasc.valor === 'number') selecionarValor(rasc.valor);
+    }
   }
 
   correcoesRecentes.length = 0;
@@ -456,6 +520,7 @@ function renderRespostaLikert(tipo) {
 
 function selecionarValor(valor) {
   coleta.valorAtual = valor;
+  salvarRascunho();
   document.querySelectorAll('#resposta-nota10 .nota-btn').forEach((b, i) => b.classList.toggle('selecionado', i === valor));
   document.querySelectorAll('#resposta-likert .likert-btn').forEach((b, i) => b.classList.toggle('selecionado', i === valor - 1));
 }
@@ -490,6 +555,7 @@ $('btn-autocorrecao').addEventListener('click', () => {
   atualizarBotaoAutocorrecao();
 });
 
+$('transcricao-texto').addEventListener('input', salvarRascunho);
 carregarCorretor();
 atualizarBotaoAutocorrecao();
 ativarAutocorrecao($('transcricao-texto'), {
@@ -503,39 +569,38 @@ ativarAutocorrecao($('transcricao-texto'), {
 $('btn-pular-pergunta').addEventListener('click', () => avancarPergunta(true));
 $('btn-confirmar-pergunta').addEventListener('click', () => avancarPergunta(false));
 
-async function avancarPergunta(pular) {
+function avancarPergunta(pular) {
   const perguntas = coleta.session.perguntas;
   const p = perguntas[coleta.indicePergunta];
   const texto = $('transcricao-texto').value.trim();
 
-  try {
-    if (!pular) {
-      if (p.tipo === 'aberta') {
-        if (texto) {
-          await updateDoc(coleta.respondenteRef, { [`abertas.${p.id}`]: texto });
-          coleta.respostasCache[p.id] = { texto };
-        }
-      } else if (coleta.valorAtual !== null) {
-        await updateDoc(coleta.respondenteRef, { [`respostas.${p.id}`]: { valor: coleta.valorAtual, texto } });
-        coleta.respostasCache[p.id] = { valor: coleta.valorAtual, texto };
-      }
+  if (!pular) {
+    if (p.tipo !== 'aberta' && coleta.valorAtual === null) {
+      toast('Toque na nota/nível antes de confirmar (ou use "Pular").');
+      return;
     }
-  } catch (e) {
-    toast('Sem conexão — a resposta não foi salva. Tente confirmar novamente.');
-    return;
+    if (p.tipo === 'aberta') {
+      if (texto) {
+        gravarRespondente({ [`abertas.${p.id}`]: texto });
+        coleta.respostasCache[p.id] = { texto };
+      }
+    } else {
+      gravarRespondente({ [`respostas.${p.id}`]: { valor: coleta.valorAtual, texto } });
+      coleta.respostasCache[p.id] = { valor: coleta.valorAtual, texto };
+    }
   }
+  limparRascunho();
 
   coleta.indicePergunta++;
   if (coleta.indicePergunta >= perguntas.length) {
-    try {
-      await updateDoc(coleta.respondenteRef, { finalizadoEm: serverTimestamp() });
-    } catch (e) {
-      toast('Sem conexão ao finalizar — tente novamente em instantes.');
-      coleta.indicePergunta--;
-      return;
+    const n = coleta.seq;
+    if (coleta.respondenteCriado) {
+      gravarRespondente({ finalizadoEm: serverTimestamp() });
+      gravarLocal('falclima_em_andamento', null);
+      waitForPendingWrites(db).then(() => toast(`Respondente ${n} salvo e enviado.`)).catch(() => {});
     }
-    toast(`Respondente ${coleta.seq} salvo. Iniciando o próximo.`);
-    coleta.seq++;
+    toast(`Respondente ${n} concluído. Iniciando o próximo.`);
+    coleta.seq = Math.max(coleta.seq, (coleta.session.proximoSeq || 1) - 1) + 1;
     iniciarNovoRespondente();
   } else {
     mostrarPergunta();
@@ -557,14 +622,9 @@ function respondentesFiltrados(filtro) {
   return filtro ? comResposta.filter((r) => r.segmento === filtro) : comResposta;
 }
 
-$('btn-reabrir').addEventListener('click', async () => {
+$('btn-reabrir').addEventListener('click', () => {
   if (!relatorioSessionId) return;
-  try {
-    await updateDoc(doc(db, 'sessions', relatorioSessionId), { status: 'aberta', encerradoEm: null });
-  } catch (e) {
-    toast('Sem conexão — tente reabrir novamente.');
-    return;
-  }
+  updateDoc(doc(db, 'sessions', relatorioSessionId), { status: 'aberta', encerradoEm: null }).catch(falhaGravar);
   location.hash = `#/coleta/${relatorioSessionId}`;
 });
 
@@ -616,9 +676,9 @@ function carregarPptxGenJS() {
   return new Promise((resolve, reject) => {
     if (window.PptxGenJS) return resolve();
     const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js';
+    s.src = 'vendor/pptxgen.bundle.js';
     s.onload = () => resolve();
-    s.onerror = () => reject(new Error('não foi possível carregar a biblioteca de PPT (verifique a internet)'));
+    s.onerror = () => reject(new Error('não foi possível carregar a biblioteca de PPT'));
     document.head.appendChild(s);
   });
 }
@@ -812,7 +872,7 @@ function renderRelatorio() {
 // ---------- tela: editar histórico ----------
 const editar = { sessionId: null, session: null, itens: [] };
 
-async function telaEditar(sessionId) {
+async function telaEditar(sessionId, seqAbrir = 0) {
   mostrarTela('tela-editar');
   $('editar-lista').classList.remove('hidden');
   $('editar-detalhe').classList.add('hidden');
@@ -822,7 +882,7 @@ async function telaEditar(sessionId) {
     sSnap = await getDoc(doc(db, 'sessions', sessionId));
     rSnap = await getDocs(query(collection(db, 'sessions', sessionId, 'respondentes'), orderBy('seq')));
   } catch (e) {
-    toast('Sem conexão com o Firebase. Verifique a internet e tente novamente.');
+    toast('Esta pesquisa ainda não está guardada neste aparelho. Abra-a uma vez com internet.');
     location.hash = '#/'; return;
   }
   if (!sSnap.exists()) { toast('Pesquisa não encontrada.'); location.hash = '#/'; return; }
@@ -835,11 +895,41 @@ async function telaEditar(sessionId) {
   $('link-editar-relatorio').href = `#/relatorio/${sessionId}`;
   atualizarLogoTopbar(editar.session.logo);
   renderListaEditar();
+  const alvo = seqAbrir && editar.itens.find((x) => x.seq === seqAbrir);
+  if (alvo) abrirEdicao(alvo);
 }
+
+function ehVazio(r) {
+  return Object.keys(r.respostas || {}).length + Object.keys(r.abertas || {}).length === 0;
+}
+
+$('btn-editar-coletar').addEventListener('click', () => {
+  if (!editar.sessionId) return;
+  if (editar.session.status !== 'aberta') {
+    updateDoc(doc(db, 'sessions', editar.sessionId), { status: 'aberta', encerradoEm: null }).catch(falhaGravar);
+  }
+  location.hash = `#/coleta/${editar.sessionId}`;
+});
+
+$('btn-limpar-vazios').addEventListener('click', () => {
+  const vazios = editar.itens.filter(ehVazio);
+  if (!vazios.length) return;
+  if (!confirm(`Apagar ${vazios.length} respondente(s) VAZIO(S), sem nenhuma resposta?\n\nOs respondentes que têm respostas não são mexidos.`)) return;
+  vazios.forEach((r) => deleteDoc(r.ref).catch(falhaGravar));
+  editar.itens = editar.itens.filter((r) => !ehVazio(r));
+  const maior = editar.itens.reduce((m, r) => Math.max(m, r.seq || 0), 0);
+  updateDoc(doc(db, 'sessions', editar.sessionId), { proximoSeq: maior + 1 }).catch(falhaGravar);
+  toast('Respondentes vazios apagados.');
+  renderListaEditar();
+});
 
 function renderListaEditar() {
   $('editar-lista').classList.remove('hidden');
   $('editar-detalhe').classList.add('hidden');
+  $('editar-acoes-lista').classList.remove('hidden');
+  const vazios = editar.itens.filter(ehVazio).length;
+  $('btn-limpar-vazios').classList.toggle('hidden', vazios === 0);
+  $('btn-limpar-vazios').textContent = `🧹 Apagar ${vazios} respondente(s) vazio(s)`;
   const cont = $('editar-lista');
   cont.innerHTML = '';
   if (!editar.itens.length) {
@@ -847,14 +937,14 @@ function renderListaEditar() {
     return;
   }
   const total = (editar.session.perguntas || []).length;
-  editar.itens.forEach((r) => {
+  [...editar.itens].sort((a, b) => b.seq - a.seq).forEach((r) => {
     const respondidas = Object.keys(r.respostas || {}).length + Object.keys(r.abertas || {}).length;
     const item = document.createElement('div');
     item.className = 'pesquisa-item';
     item.innerHTML = `
       <div class="pesquisa-item-info">
         <div class="pesquisa-item-nome">Respondente ${r.seq}${r.segmento ? ' · ' + escapeHtml(r.segmento) : ''}</div>
-        <div class="pesquisa-item-meta">${respondidas} de ${total} respondidas</div>
+        <div class="pesquisa-item-meta">${respondidas === 0 ? 'vazio (nenhuma resposta)' : respondidas + ' de ' + total + ' respondidas'}</div>
       </div>
       <span class="badge-status badge-encerrada">Editar</span>
     `;
@@ -875,6 +965,7 @@ function abrirEdicao(r) {
   const det = $('editar-detalhe');
   det.innerHTML = '';
   $('editar-lista').classList.add('hidden');
+  $('editar-acoes-lista').classList.add('hidden');
   det.classList.remove('hidden');
   window.scrollTo(0, 0);
 
@@ -944,16 +1035,14 @@ function abrirEdicao(r) {
     <button type="button" class="btn btn-apagar-grande" data-acao="apagar">Apagar respondente</button>
     <button type="button" class="btn btn-primario" data-acao="salvar">Salvar alterações</button>`;
   acoes.querySelector('[data-acao="voltar"]').addEventListener('click', renderListaEditar);
-  acoes.querySelector('[data-acao="apagar"]').addEventListener('click', async () => {
+  acoes.querySelector('[data-acao="apagar"]').addEventListener('click', () => {
     if (!confirm(`Apagar o Respondente ${r.seq} e todas as respostas dele?\n\nNão dá para desfazer.`)) return;
-    try {
-      await deleteDoc(r.ref);
-    } catch (e) { toast('Não foi possível apagar. Verifique a conexão.'); return; }
+    deleteDoc(r.ref).catch(falhaGravar);
     editar.itens = editar.itens.filter((x) => x !== r);
     toast('Respondente apagado.');
     renderListaEditar();
   });
-  acoes.querySelector('[data-acao="salvar"]').addEventListener('click', async () => {
+  acoes.querySelector('[data-acao="salvar"]').addEventListener('click', () => {
     const respostas = {};
     const abertas = {};
     perguntas.forEach((p) => {
@@ -964,15 +1053,24 @@ function abrirEdicao(r) {
         respostas[p.id] = { valor: draft.valores[p.id], texto: (draft.textos[p.id] || '').trim() };
       }
     });
-    try {
-      await updateDoc(r.ref, { segmento: draft.segmento || null, respostas, abertas });
-    } catch (e) { toast('Sem conexão — as alterações não foram salvas.'); return; }
+    updateDoc(r.ref, { segmento: draft.segmento || null, respostas, abertas }).catch(falhaGravar);
     Object.assign(r, { segmento: draft.segmento || null, respostas, abertas });
     toast('Alterações salvas.');
     renderListaEditar();
   });
   det.appendChild(acoes);
 }
+
+// ---------- conexão ----------
+function atualizarStatusRede() {
+  $('status-rede').classList.toggle('hidden', navigator.onLine);
+}
+window.addEventListener('offline', atualizarStatusRede);
+window.addEventListener('online', () => {
+  atualizarStatusRede();
+  if (db) waitForPendingWrites(db).then(() => toast('Conexão de volta — tudo foi enviado.')).catch(() => {});
+});
+atualizarStatusRede();
 
 // PWA
 if ('serviceWorker' in navigator) {

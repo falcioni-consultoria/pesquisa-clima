@@ -251,3 +251,7 @@ a.btn { text-decoration: none; display: inline-block; }
 .chip-correcao:hover { background: #ffefc2; }
 
 #btn-autocorrecao { display: block; margin: 2px 0 12px; }
+
+.status-rede { position: sticky; top: 0; z-index: 30; background: #b45309; color: #fff; text-align: center; font-size: 13px; font-weight: 600; padding: 8px 12px; }
+.editar-acoes-lista { margin-bottom: 12px; }
+.coleta-status { gap: 8px; flex-wrap: wrap; }

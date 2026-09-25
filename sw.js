@@ -1,8 +1,15 @@
-const CACHE = 'pesquisa-clima-v12';
-const ARQUIVOS = ['./index.html', './style.css', './app.js', './questions.js', './firebase-config.js', './manifest.json', './icons/falcioni-mark.png', './autocorrecao.js', './dicionario-pt.txt'];
+const CACHE = 'pesquisa-clima-v13';
+const ARQUIVOS = [
+  './', './index.html', './style.css', './app.js', './questions.js', './firebase-config.js', './manifest.json',
+  './autocorrecao.js', './dicionario-pt.txt',
+  './vendor/firebase-app.js', './vendor/firebase-firestore.js', './vendor/pptxgen.bundle.js',
+  './icons/falcioni-mark.png', './icons/icon-192.png', './icons/icon-512.png',
+];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ARQUIVOS)));
+  event.waitUntil(
+    caches.open(CACHE).then((cache) => Promise.allSettled(ARQUIVOS.map((a) => cache.add(a))))
+  );
   self.skipWaiting();
 });
 
@@ -13,18 +20,34 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// network-first: GitHub Pages não permite header Cache-Control customizado,
-// então evitamos servir versão antiga do app preferindo sempre a rede quando disponível.
+// Rede primeiro (pega versão nova), mas se a internet estiver fora ou lenta (4 s) usa o que está guardado,
+// para o app abrir mesmo sem internet.
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   if (new URL(event.request.url).origin !== self.location.origin) return;
-  event.respondWith(
-    fetch(event.request, { cache: 'no-cache' })
-      .then((resp) => {
+  const doCache = async () => {
+    const cache = await caches.open(CACHE);
+    const achado = await cache.match(event.request, { ignoreSearch: true });
+    if (achado) return achado;
+    if (event.request.mode === 'navigate') return cache.match('./index.html');
+    return undefined;
+  };
+  event.respondWith((async () => {
+    try {
+      const rede = fetch(event.request, { cache: 'no-cache' });
+      const resp = await Promise.race([
+        rede,
+        new Promise((_, rej) => setTimeout(() => rej(new Error('lento')), 4000)),
+      ]);
+      if (resp && resp.ok) {
         const copia = resp.clone();
-        caches.open(CACHE).then((cache) => cache.put(event.request, copia));
-        return resp;
-      })
-      .catch(() => caches.match(event.request))
-  );
+        caches.open(CACHE).then((c) => c.put(event.request, copia));
+      }
+      return resp;
+    } catch (e) {
+      const guardado = await doCache();
+      if (guardado) return guardado;
+      return Response.error();
+    }
+  })());
 });
