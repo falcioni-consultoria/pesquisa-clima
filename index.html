@@ -50,7 +50,7 @@
     </div>
     <div id="lista-pesquisas" class="lista-pesquisas"></div>
     <p id="lista-vazia" class="texto-vazio hidden">Nenhuma pesquisa criada ainda. Toque em "Nova pesquisa" para começar.</p>
-    <p class="versao">Falclima · versão 13</p>
+    <p class="versao">Falclima · versão 14</p>
   </section>
 
   <!-- Nova pesquisa -->
@@ -126,6 +126,11 @@
       <button id="btn-encerrar-pesquisa" class="btn-link">Encerrar pesquisa</button>
     </div>
 
+    <label class="campo campo-nome">
+      <span>Nome do respondente (opcional — só para você, não aparece no relatório nem no PPT)</span>
+      <input type="text" id="input-nome-respondente" placeholder="Digite o nome" autocomplete="off">
+    </label>
+
     <div class="progresso-barra"><div id="progresso-fill" class="progresso-fill"></div></div>
 
     <!-- Escolha de segmento -->
@@ -173,6 +178,8 @@
       </div>
     </div>
     <div id="editar-acoes-lista" class="editar-acoes-lista">
+      <button id="btn-importar-planilha" class="btn btn-secundario btn-pequeno">📥 Importar planilha (Google Forms)</button>
+      <input type="file" id="arquivo-planilha" accept=".csv,.xlsx" class="hidden">
       <button id="btn-limpar-vazios" class="btn btn-apagar-grande btn-pequeno hidden"></button>
     </div>
     <div id="editar-lista" class="lista-pesquisas"></div>

@@ -6,6 +6,7 @@ import {
   getDoc, getDocs, deleteDoc, waitForPendingWrites,
 } from './vendor/firebase-firestore.js';
 import { NIVEIS, TIPO_LABEL, montarModelo, novaPergunta, SEGMENTOS_PADRAO } from './questions.js';
+import { lerPlanilha, sugerirColuna, acharColuna, converterValor, idDaLinha } from './importar.js';
 import { carregarCorretor, ativarAutocorrecao, autocorrecaoLigada, definirAutocorrecao, desfazerCorrecao } from './autocorrecao.js';
 
 const configPendente = firebaseConfig.apiKey === 'COLE_AQUI';
@@ -297,6 +298,7 @@ const coleta = {
   respondenteCriado: false,
   seq: 1,
   segmento: null,
+  nome: '',
   indicePergunta: 0,
   valorAtual: null,
   respostasCache: {},
@@ -361,6 +363,8 @@ async function tentarRetomar() {
   coleta.respondenteCriado = true;
   coleta.seq = d.seq;
   coleta.segmento = d.segmento || null;
+  coleta.nome = d.nome || '';
+  $('input-nome-respondente').value = coleta.nome;
   coleta.respostasCache = {};
   perguntas.forEach((p) => {
     const r = (d.respostas || {})[p.id];
@@ -389,6 +393,8 @@ $('btn-ver-respondidos').addEventListener('click', () => {
 function iniciarNovoRespondente() {
   coleta.indicePergunta = 0;
   coleta.segmento = null;
+  coleta.nome = '';
+  $('input-nome-respondente').value = '';
   coleta.respostasCache = {};
   coleta.respondenteCriado = false;
   coleta.respondenteRef = doc(collection(db, 'sessions', coleta.sessionId, 'respondentes'));
@@ -408,6 +414,7 @@ function gravarRespondente(dados) {
     setDoc(coleta.respondenteRef, {
       seq: coleta.seq,
       segmento: coleta.segmento || null,
+      nome: coleta.nome || null,
       respostas: {},
       abertas: {},
       criadoEm: serverTimestamp(),
@@ -439,6 +446,12 @@ function mostrarBlocoSegmento(segmentos) {
 }
 
 $('btn-pular-segmento').addEventListener('click', () => mostrarPergunta());
+
+// o nome só é gravado junto com o respondente; digitar sem responder nada não cria registro vazio
+$('input-nome-respondente').addEventListener('input', (e) => {
+  coleta.nome = e.target.value;
+  if (coleta.respondenteCriado) updateDoc(coleta.respondenteRef, { nome: coleta.nome.trim() || null }).catch(falhaGravar);
+});
 
 
 function mostrarPergunta() {
@@ -923,6 +936,127 @@ $('btn-limpar-vazios').addEventListener('click', () => {
   renderListaEditar();
 });
 
+// ---------- importar planilha do Google Forms ----------
+$('btn-importar-planilha').addEventListener('click', () => {
+  $('arquivo-planilha').value = '';
+  $('arquivo-planilha').click();
+});
+
+$('arquivo-planilha').addEventListener('change', async (e) => {
+  const arquivo = e.target.files && e.target.files[0];
+  if (!arquivo) return;
+  try {
+    abrirImportacao(await lerPlanilha(arquivo), arquivo.name);
+  } catch (err) {
+    toast((err && err.message) || 'Não consegui ler esta planilha.');
+  }
+});
+
+function abrirImportacao(planilha, nomeArquivo) {
+  const { cabecalho, linhas } = planilha;
+  const perguntas = editar.session.perguntas || [];
+  const det = $('editar-detalhe');
+  det.innerHTML = '';
+  $('editar-lista').classList.add('hidden');
+  $('editar-acoes-lista').classList.add('hidden');
+  det.classList.remove('hidden');
+  window.scrollTo(0, 0);
+
+  const usadas = new Set();
+  const mapa = {};
+  perguntas.forEach((p) => {
+    const i = sugerirColuna(p.texto, cabecalho, usadas);
+    mapa[p.id] = i;
+    if (i >= 0) usadas.add(i);
+  });
+  const colNome = acharColuna(cabecalho, /^(nome|seu nome|name)\b/);
+  const colSeg = acharColuna(cabecalho, /\b(setor|segmento|departamento|area)\b/);
+  const escolha = { nome: colNome, segmento: colSeg };
+
+  const opcoesCol = (sel) => `<option value="-1">— não importar —</option>` +
+    cabecalho.map((h, i) => `<option value="${i}" ${i === sel ? 'selected' : ''}>${escapeHtml(h || '(coluna ' + (i + 1) + ')')}</option>`).join('');
+
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = `
+    <h2>Importar planilha</h2>
+    <p class="ajuda">${escapeHtml(nomeArquivo)} — ${linhas.length} resposta(s) encontrada(s). Confira qual coluna da planilha corresponde a cada pergunta.</p>
+    <label class="campo"><span>Nome do respondente (opcional)</span><select data-campo="nome">${opcoesCol(colNome)}</select></label>
+    <label class="campo"><span>Setor / segmento (opcional)</span><select data-campo="segmento">${opcoesCol(colSeg)}</select></label>
+    ${perguntas.map((p, idx) => `
+      <label class="campo"><span>${idx + 1}. ${escapeHtml(p.texto)}</span><select data-pergunta="${p.id}">${opcoesCol(mapa[p.id])}</select></label>`).join('')}
+    <p id="import-resumo" class="ajuda"></p>`;
+  det.appendChild(card);
+
+  const resumo = () => {
+    const existentes = new Set(editar.itens.map((r) => r.importId).filter(Boolean));
+    const prontos = [];
+    let repetidas = 0;
+    let vazias = 0;
+    linhas.forEach((l) => {
+      const id = idDaLinha(l);
+      if (existentes.has(id)) { repetidas++; return; }
+      const temResposta = perguntas.some((p) => mapa[p.id] >= 0 && converterValor(p, l[mapa[p.id]]) !== null);
+      if (!temResposta) { vazias++; return; }
+      prontos.push({ id, linha: l });
+    });
+    $('import-resumo').textContent = `Serão importados ${prontos.length} respondente(s)` +
+      (repetidas ? `; ${repetidas} já importado(s) antes serão ignorados` : '') +
+      (vazias ? `; ${vazias} sem nenhuma resposta reconhecida serão ignorados` : '') + '.';
+    return prontos;
+  };
+  card.addEventListener('change', (ev) => {
+    const s = ev.target;
+    if (s.dataset.pergunta) mapa[s.dataset.pergunta] = parseInt(s.value, 10);
+    else if (s.dataset.campo) escolha[s.dataset.campo] = parseInt(s.value, 10);
+    resumo();
+  });
+  resumo();
+
+  const acoes = document.createElement('div');
+  acoes.className = 'coleta-acoes';
+  acoes.innerHTML = `
+    <button type="button" class="btn btn-secundario" data-acao="voltar">← Cancelar</button>
+    <button type="button" class="btn btn-primario" data-acao="importar">Importar respostas</button>`;
+  acoes.querySelector('[data-acao="voltar"]').addEventListener('click', renderListaEditar);
+  acoes.querySelector('[data-acao="importar"]').addEventListener('click', () => {
+    const prontos = resumo();
+    if (!prontos.length) { toast('Nada para importar.'); return; }
+    if (!confirm(`Importar ${prontos.length} respondente(s) para esta pesquisa?`)) return;
+    importarLinhas(prontos, perguntas, mapa, escolha);
+  });
+  det.appendChild(acoes);
+}
+
+function importarLinhas(prontos, perguntas, mapa, escolha) {
+  const maior = editar.itens.reduce((m, r) => Math.max(m, r.seq || 0), 0);
+  let seq = Math.max(maior, (editar.session.proximoSeq || 1) - 1);
+  const segmentos = [...(editar.session.segmentos || [])];
+  prontos.forEach(({ id, linha }) => {
+    seq++;
+    const respostas = {};
+    const abertas = {};
+    perguntas.forEach((p) => {
+      if (mapa[p.id] < 0) return;
+      const v = converterValor(p, linha[mapa[p.id]]);
+      if (v === null) return;
+      if (p.tipo === 'aberta') abertas[p.id] = v; else respostas[p.id] = { valor: v, texto: '' };
+    });
+    const nome = escolha.nome >= 0 ? (linha[escolha.nome] || '').trim() || null : null;
+    const segmento = escolha.segmento >= 0 ? (linha[escolha.segmento] || '').trim() || null : null;
+    if (segmento && !segmentos.includes(segmento)) segmentos.push(segmento);
+    const ref = doc(collection(db, 'sessions', editar.sessionId, 'respondentes'));
+    const dados = { seq, nome, segmento, respostas, abertas, origem: 'importado', importId: id };
+    setDoc(ref, { ...dados, criadoEm: serverTimestamp(), finalizadoEm: serverTimestamp() }).catch(falhaGravar);
+    editar.itens.push({ ref, ...dados });
+  });
+  updateDoc(doc(db, 'sessions', editar.sessionId), { proximoSeq: seq + 1, segmentos }).catch(falhaGravar);
+  editar.session.proximoSeq = seq + 1;
+  editar.session.segmentos = segmentos;
+  toast(`${prontos.length} respondente(s) importado(s).`);
+  renderListaEditar();
+}
+
 function renderListaEditar() {
   $('editar-lista').classList.remove('hidden');
   $('editar-detalhe').classList.add('hidden');
@@ -943,7 +1077,7 @@ function renderListaEditar() {
     item.className = 'pesquisa-item';
     item.innerHTML = `
       <div class="pesquisa-item-info">
-        <div class="pesquisa-item-nome">Respondente ${r.seq}${r.segmento ? ' · ' + escapeHtml(r.segmento) : ''}</div>
+        <div class="pesquisa-item-nome">Respondente ${r.seq}${r.nome ? ' — ' + escapeHtml(r.nome) : ''}${r.segmento ? ' · ' + escapeHtml(r.segmento) : ''}</div>
         <div class="pesquisa-item-meta">${respondidas === 0 ? 'vazio (nenhuma resposta)' : respondidas + ' de ' + total + ' respondidas'}</div>
       </div>
       <span class="badge-status badge-encerrada">Editar</span>
@@ -955,7 +1089,7 @@ function renderListaEditar() {
 
 function abrirEdicao(r) {
   const perguntas = editar.session.perguntas || [];
-  const draft = { segmento: r.segmento || '', valores: {}, textos: {}, abertas: { ...(r.abertas || {}) } };
+  const draft = { nome: r.nome || '', segmento: r.segmento || '', valores: {}, textos: {}, abertas: { ...(r.abertas || {}) } };
   perguntas.forEach((p) => {
     const atual = (r.respostas || {})[p.id];
     if (atual && typeof atual.valor === 'number') draft.valores[p.id] = atual.valor;
@@ -975,6 +1109,9 @@ function abrirEdicao(r) {
   topo.className = 'card';
   topo.innerHTML = `
     <h2>Respondente ${r.seq}</h2>
+    <label class="campo"><span>Nome (só para você, não aparece no relatório)</span>
+      <input type="text" class="editar-nome" value="${escapeHtml(draft.nome)}" autocomplete="off">
+    </label>
     <label class="campo"><span>Setor / segmento</span>
       <select>
         <option value="">(sem segmento)</option>
@@ -982,6 +1119,7 @@ function abrirEdicao(r) {
       </select>
     </label>`;
   topo.querySelector('select').addEventListener('change', (e) => { draft.segmento = e.target.value; });
+  topo.querySelector('.editar-nome').addEventListener('input', (e) => { draft.nome = e.target.value; });
   det.appendChild(topo);
 
   perguntas.forEach((p, idx) => {
@@ -1053,8 +1191,9 @@ function abrirEdicao(r) {
         respostas[p.id] = { valor: draft.valores[p.id], texto: (draft.textos[p.id] || '').trim() };
       }
     });
-    updateDoc(r.ref, { segmento: draft.segmento || null, respostas, abertas }).catch(falhaGravar);
-    Object.assign(r, { segmento: draft.segmento || null, respostas, abertas });
+    const nome = draft.nome.trim() || null;
+    updateDoc(r.ref, { nome, segmento: draft.segmento || null, respostas, abertas }).catch(falhaGravar);
+    Object.assign(r, { nome, segmento: draft.segmento || null, respostas, abertas });
     toast('Alterações salvas.');
     renderListaEditar();
   });

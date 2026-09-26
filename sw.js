@@ -1,6 +1,6 @@
-const CACHE = 'pesquisa-clima-v13';
+const CACHE = 'pesquisa-clima-v14';
 const ARQUIVOS = [
-  './', './index.html', './style.css', './app.js', './questions.js', './firebase-config.js', './manifest.json',
+  './', './index.html', './style.css', './app.js', './questions.js', './importar.js', './vendor/xlsx.mini.min.js', './firebase-config.js', './manifest.json',
   './autocorrecao.js', './dicionario-pt.txt',
   './vendor/firebase-app.js', './vendor/firebase-firestore.js', './vendor/pptxgen.bundle.js',
   './icons/falcioni-mark.png', './icons/icon-192.png', './icons/icon-512.png',
