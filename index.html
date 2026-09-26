@@ -50,7 +50,7 @@
     </div>
     <div id="lista-pesquisas" class="lista-pesquisas"></div>
     <p id="lista-vazia" class="texto-vazio hidden">Nenhuma pesquisa criada ainda. Toque em "Nova pesquisa" para começar.</p>
-    <p class="versao">Falclima · versão 14</p>
+    <p class="versao">Falclima · versão 15</p>
   </section>
 
   <!-- Nova pesquisa -->
@@ -123,6 +123,7 @@
     <div class="coleta-status">
       <span id="coleta-respondente-label">Respondente 1</span>
       <button id="btn-ver-respondidos" class="btn btn-secundario btn-pequeno">📋 Voltar às respondidas</button>
+      <button id="btn-setores-coleta" class="btn btn-secundario btn-pequeno">🏷 Setores</button>
       <button id="btn-encerrar-pesquisa" class="btn-link">Encerrar pesquisa</button>
     </div>
 
@@ -178,6 +179,7 @@
       </div>
     </div>
     <div id="editar-acoes-lista" class="editar-acoes-lista">
+      <button id="btn-setores-editar" class="btn btn-secundario btn-pequeno">🏷 Editar setores</button>
       <button id="btn-importar-planilha" class="btn btn-secundario btn-pequeno">📥 Importar planilha (Google Forms)</button>
       <input type="file" id="arquivo-planilha" accept=".csv,.xlsx" class="hidden">
       <button id="btn-limpar-vazios" class="btn btn-apagar-grande btn-pequeno hidden"></button>
@@ -214,6 +216,19 @@
   </section>
 
 </main>
+
+<div id="painel-setores" class="painel-overlay hidden">
+  <div class="card painel-setores-card">
+    <h2>Setores / segmentos</h2>
+    <p class="ajuda">Edite, adicione ou remova. Renomear um setor atualiza quem já foi marcado nele. Remover não apaga as respostas de ninguém.</p>
+    <div id="lista-setores-edit"></div>
+    <button id="btn-add-setor" class="btn btn-secundario btn-pequeno">+ Adicionar setor</button>
+    <div class="coleta-acoes">
+      <button id="btn-cancelar-setores" class="btn btn-secundario">Cancelar</button>
+      <button id="btn-salvar-setores" class="btn btn-primario">Salvar setores</button>
+    </div>
+  </div>
+</div>
 
 <div id="toast" class="toast hidden"></div>
 

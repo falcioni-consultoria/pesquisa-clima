@@ -671,14 +671,23 @@ async function telaRelatorio(sessionId) {
   }
 
   const selFiltro = $('filtro-segmento');
-  selFiltro.innerHTML = '<option value="">Todos</option>' +
-    (relatorioSession.segmentos || []).map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
+  // lista de setores da pesquisa + qualquer setor que ainda apareça em respondentes (inclusive removidos da lista)
+  const montarFiltro = () => {
+    const atual = selFiltro.value;
+    const todos = [...(relatorioSession.segmentos || [])];
+    relatorioRespondentes.forEach((r) => { if (r.segmento && !todos.includes(r.segmento)) todos.push(r.segmento); });
+    selFiltro.innerHTML = '<option value="">Todos</option>' +
+      todos.map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
+    selFiltro.value = todos.includes(atual) ? atual : '';
+  };
+  montarFiltro();
   selFiltro.onchange = renderRelatorio;
 
   const q = query(collection(db, 'sessions', sessionId, 'respondentes'), orderBy('seq'));
   relatorioUnsub = onSnapshot(q, (qs) => {
     relatorioRespondentes = [];
     qs.forEach((d) => relatorioRespondentes.push(d.data()));
+    montarFiltro();
     renderRelatorio();
   });
 }
@@ -934,6 +943,82 @@ $('btn-limpar-vazios').addEventListener('click', () => {
   updateDoc(doc(db, 'sessions', editar.sessionId), { proximoSeq: maior + 1 }).catch(falhaGravar);
   toast('Respondentes vazios apagados.');
   renderListaEditar();
+});
+
+// ---------- editar setores / segmentos ----------
+const painelSetores = { sessionId: null, session: null, linhas: [], aoSalvar: null };
+
+function desenharSetores() {
+  const cont = $('lista-setores-edit');
+  cont.innerHTML = '';
+  painelSetores.linhas.forEach((l, idx) => {
+    const div = document.createElement('div');
+    div.className = 'setor-linha';
+    div.innerHTML = `<input type="text" value="${escapeHtml(l.atual)}" placeholder="Nome do setor" autocomplete="off">
+      <button type="button" class="btn btn-apagar-grande btn-pequeno" title="Remover">✕</button>`;
+    div.querySelector('input').addEventListener('input', (e) => { l.atual = e.target.value; });
+    div.querySelector('button').addEventListener('click', () => { painelSetores.linhas.splice(idx, 1); desenharSetores(); });
+    cont.appendChild(div);
+  });
+}
+
+function abrirPainelSetores(sessionId, session, aoSalvar) {
+  Object.assign(painelSetores, {
+    sessionId, session, aoSalvar,
+    linhas: (session.segmentos || []).map((s) => ({ orig: s, atual: s })),
+  });
+  desenharSetores();
+  $('painel-setores').classList.remove('hidden');
+}
+
+$('btn-add-setor').addEventListener('click', () => {
+  painelSetores.linhas.push({ orig: null, atual: '' });
+  desenharSetores();
+  const inputs = $('lista-setores-edit').querySelectorAll('input');
+  if (inputs.length) inputs[inputs.length - 1].focus();
+});
+
+$('btn-cancelar-setores').addEventListener('click', () => $('painel-setores').classList.add('hidden'));
+
+$('btn-salvar-setores').addEventListener('click', async () => {
+  const { sessionId, session, linhas } = painelSetores;
+  const nomes = [];
+  linhas.forEach((l) => { const n = l.atual.trim(); if (n && !nomes.includes(n)) nomes.push(n); });
+  const renomeados = linhas
+    .filter((l) => l.orig && l.atual.trim() && l.atual.trim() !== l.orig)
+    .map((l) => [l.orig, l.atual.trim()]);
+  updateDoc(doc(db, 'sessions', sessionId), { segmentos: nomes }).catch(falhaGravar);
+  session.segmentos = nomes;
+  $('painel-setores').classList.add('hidden');
+  toast('Setores salvos.');
+  if (renomeados.length) {
+    try {
+      const snap = await getDocs(collection(db, 'sessions', sessionId, 'respondentes'));
+      snap.docs.forEach((d) => {
+        const par = renomeados.find(([antigo]) => antigo === d.data().segmento);
+        if (par) updateDoc(d.ref, { segmento: par[1] }).catch(falhaGravar);
+      });
+      if (editar.sessionId === sessionId) {
+        editar.itens.forEach((r) => { const par = renomeados.find(([antigo]) => antigo === r.segmento); if (par) r.segmento = par[1]; });
+      }
+    } catch (e) { falhaGravar(e); }
+  }
+  if (painelSetores.aoSalvar) painelSetores.aoSalvar();
+});
+
+$('btn-setores-editar').addEventListener('click', () => {
+  if (editar.session) abrirPainelSetores(editar.sessionId, editar.session, renderListaEditar);
+});
+
+$('btn-setores-coleta').addEventListener('click', () => {
+  if (!coleta.session) return;
+  abrirPainelSetores(coleta.sessionId, coleta.session, () => {
+    // respondente ainda sem resposta: mostra a escolha de setor com a lista nova
+    if (!coleta.respondenteCriado && coleta.indicePergunta === 0) {
+      if ((coleta.session.segmentos || []).length) mostrarBlocoSegmento(coleta.session.segmentos);
+      else mostrarPergunta();
+    }
+  });
 });
 
 // ---------- importar planilha do Google Forms ----------

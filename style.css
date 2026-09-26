@@ -253,5 +253,11 @@ a.btn { text-decoration: none; display: inline-block; }
 #btn-autocorrecao { display: block; margin: 2px 0 12px; }
 
 .status-rede { position: sticky; top: 0; z-index: 30; background: #b45309; color: #fff; text-align: center; font-size: 13px; font-weight: 600; padding: 8px 12px; }
+.painel-overlay { position: fixed; inset: 0; background: rgba(18, 33, 63, .55); z-index: 50; display: flex; align-items: flex-start; justify-content: center; padding: 20px 12px; overflow-y: auto; }
+.painel-overlay.hidden { display: none; }
+.painel-setores-card { width: 100%; max-width: 480px; }
+.setor-linha { display: flex; gap: 8px; margin-bottom: 8px; }
+.setor-linha input { flex: 1; padding: 10px 12px; border: 1px solid #cfd6e2; border-radius: 8px; font-size: 15px; }
+.setor-linha button { flex: none; }
 .editar-acoes-lista { margin-bottom: 12px; display: flex; flex-wrap: wrap; gap: 8px; }
 .coleta-status { gap: 8px; flex-wrap: wrap; }
