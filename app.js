@@ -747,16 +747,30 @@ async function gerarPPT() {
       try { capa.addImage({ data: relatorioSession.logo, x: 8.3, y: 0.4, w: 1.2, h: 1.2 }); } catch (e) { /* ignora logo inválida */ }
     }
 
-    // título (com numeração da pergunta e, se for continuação, aviso), com auto-ajuste se não couber
     const MARGEM_X = 0.6;
     const LARGURA_CONTEUDO = 8.8;
+    const BANDA_H = 0.75; // faixa colorida do topo, com a pergunta dentro
+    const RODAPE_Y = 5.15; // a partir daqui é reservado para a logo/rodapé
+    const ESPACO_ENTRE_RESPOSTAS = 6; // pt, entre um comentário e outro
 
-    function adicionarTitulo(s, texto) {
+    // faixa colorida no topo com a pergunta (numerada), e logo do cliente no rodapé — em todo slide de pergunta
+    function novoSlideDePergunta(pptx, texto) {
+      const s = pptx.addSlide();
+      s.background = { color: 'FFFFFF' };
+      s.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 10, h: BANDA_H, fill: { color: CORCLIENTE }, line: { type: 'none' } });
       const tituloFonte = texto.length > 110 ? 12 : texto.length > 75 ? 13 : texto.length > 45 ? 14.5 : 16;
       s.addText(texto, {
-        x: MARGEM_X, y: 0.3, w: LARGURA_CONTEUDO, h: 0.7, fontSize: tituloFonte, bold: true, color: NAVY, fontFace: 'Arial',
-        valign: 'top', shrinkText: true,
+        x: MARGEM_X, y: 0, w: LARGURA_CONTEUDO, h: BANDA_H, fontSize: tituloFonte, bold: true, color: 'FFFFFF', fontFace: 'Arial',
+        valign: 'middle', shrinkText: true,
       });
+      const logo = relatorioSession.logo;
+      try {
+        if (logo) s.addImage({ data: logo, x: 0.4, y: 5.22, w: 0.32, h: 0.32 });
+        else s.addImage({ path: 'icons/falcioni-mark.png', x: 0.4, y: 5.28, w: 0.22, h: 0.22 });
+      } catch (e) { /* ignora logo inválida */ }
+      s.addText(relatorioSession.clienteNome || '', { x: 0.85, y: 5.25, w: 5, h: 0.3, fontSize: 9, color: GRAY, fontFace: 'Arial', valign: 'middle' });
+      s.addText('Falclima — Falcioni Consultoria', { x: 5.4, y: 5.25, w: 4.0, h: 0.3, fontSize: 8, color: GRAY, fontFace: 'Arial', valign: 'middle', align: 'right' });
+      return s;
     }
 
     // calcula, por medida de caracteres (não por contagem de itens), quantos comentários cabem
@@ -765,32 +779,36 @@ async function gerarPPT() {
       const larguraUtilPt = (w - 0.35) * 72; // desconta o recuo do marcador
       const charsPorLinha = Math.max(24, Math.floor(larguraUtilPt / (fontSize * 0.52)));
       const linhaAlturaIn = (fontSize * 1.3) / 72;
+      const espacoLinhas = (ESPACO_ENTRE_RESPOSTAS / 72) / linhaAlturaIn; // espaço extra entre respostas, em "linhas"
       const linhasDisponiveis = Math.max(1, Math.floor((h / linhaAlturaIn) * 0.88));
       const parte = [];
       let linhasUsadas = 0;
       let i = 0;
       while (i < lista.length) {
-        const linhasTexto = Math.max(1, Math.ceil(lista[i].length / charsPorLinha));
-        if (parte.length && linhasUsadas + linhasTexto > linhasDisponiveis) break;
-        parte.push(lista[i]); linhasUsadas += linhasTexto; i++;
+        const custo = Math.max(1, Math.ceil(lista[i].length / charsPorLinha)) + (parte.length ? espacoLinhas : 0);
+        if (parte.length && linhasUsadas + custo > linhasDisponiveis) break;
+        parte.push(lista[i]); linhasUsadas += custo; i++;
       }
       if (!parte.length) { parte.push(lista[0]); i = 1; } // evita loop infinito com 1 comentário gigante
       return { parte, resto: lista.slice(i) };
     }
 
     function adicionarComentarios(s, textos, { x, y, w, h, fontSize }) {
-      const bullets = textos.map((t) => ({ text: t, options: { bullet: true, color: '333333', breakLine: true, align: 'justify' } }));
+      const bullets = textos.map((t) => ({
+        text: t,
+        options: { bullet: true, color: '333333', breakLine: true, align: 'justify', paraSpaceAfter: ESPACO_ENTRE_RESPOSTAS },
+      }));
       s.addText(bullets, { x, y, w, h, fontSize, valign: 'top', fontFace: 'Arial', shrinkText: true });
     }
 
     // preenche quantos slides forem necessários, um por vez, sempre respeitando o espaço real da caixa
-    function paginarComentarios(lista, boxPrimeira, boxDemais, fontSize, novoSlide) {
+    function paginarComentarios(lista, boxPrimeira, boxDemais, fontSize, novoSlideConteudo) {
       let restante = lista;
       let primeira = true;
       while (restante.length) {
         const box = primeira ? boxPrimeira : boxDemais;
         const { parte, resto } = tirarParte(restante, box.w, box.h, fontSize);
-        adicionarComentarios(novoSlide(!primeira), parte, { ...box, fontSize });
+        adicionarComentarios(novoSlideConteudo(!primeira), parte, { ...box, fontSize });
         restante = resto;
         primeira = false;
       }
@@ -798,20 +816,15 @@ async function gerarPPT() {
 
     (relatorioSession.perguntas || []).forEach((p, idxPergunta) => {
       const tituloBase = `${idxPergunta + 1}. ${p.texto}`;
-      const novoSlide = (continuacao) => {
-        const s = pptx.addSlide();
-        s.background = { color: 'FFFFFF' };
-        adicionarTitulo(s, continuacao ? `${tituloBase} (continuação)` : tituloBase);
-        return s;
-      };
+      const novoSlide = (continuacao) => novoSlideDePergunta(pptx, continuacao ? `${tituloBase} (continuação)` : tituloBase);
 
       if (p.tipo === 'aberta') {
         const textos = respondentes.map((r) => r.abertas && r.abertas[p.id]).filter(Boolean);
         if (!textos.length) {
-          novoSlide(false).addText('Sem respostas ainda.', { x: MARGEM_X, y: 1.1, w: LARGURA_CONTEUDO, h: 0.5, fontSize: 13, color: GRAY, italic: true, fontFace: 'Arial' });
+          novoSlide(false).addText('Sem respostas ainda.', { x: MARGEM_X, y: 1.0, w: LARGURA_CONTEUDO, h: 0.5, fontSize: 13, color: GRAY, italic: true, fontFace: 'Arial' });
           return;
         }
-        const box = { x: MARGEM_X, y: 1.05, w: LARGURA_CONTEUDO, h: 4.2 };
+        const box = { x: MARGEM_X, y: 0.95, w: LARGURA_CONTEUDO, h: RODAPE_Y - 0.95 };
         paginarComentarios(textos, box, box, 10.5, novoSlide);
         return;
       }
@@ -827,13 +840,13 @@ async function gerarPPT() {
       const s1 = novoSlide(false);
 
       // média, compacta à esquerda
-      s1.addText(media === null ? '—' : formatarNumero(media), { x: MARGEM_X, y: 1.0, w: 1.6, h: 0.75, fontSize: 30, bold: true, color: CORCLIENTE, fontFace: 'Arial' });
-      s1.addText(`média (${valores.length})\nescala ${escalaLabel}`, { x: MARGEM_X, y: 1.72, w: 1.6, h: 0.45, fontSize: 8.5, color: GRAY, fontFace: 'Arial' });
+      s1.addText(media === null ? '—' : formatarNumero(media), { x: MARGEM_X, y: 0.88, w: 1.6, h: 0.75, fontSize: 30, bold: true, color: CORCLIENTE, fontFace: 'Arial' });
+      s1.addText(`média (${valores.length})\nescala ${escalaLabel}`, { x: MARGEM_X, y: 1.6, w: 1.6, h: 0.45, fontSize: 8.5, color: GRAY, fontFace: 'Arial' });
 
-      // gráfico pequeno, ao lado da média — dá mais espaço para os comentários abaixo
+      // gráfico pequeno, ao lado da média — dá mais espaço para os comentários abaixo. Mostra todas as notas/níveis, não só alguns
       if (valores.length && itens.some((it) => it.qtd > 0)) {
         s1.addChart(pptx.ChartType.bar, [{ name: 'Respostas', labels: itens.map((it) => it.label), values: itens.map((it) => it.qtd) }], {
-          x: 2.35, y: 0.98, w: 3.05, h: 1.25,
+          x: 2.35, y: 0.86, w: 3.05, h: 1.25,
           barDir: 'bar',
           chartColors: [CORCLIENTE],
           showLegend: false,
@@ -845,6 +858,7 @@ async function gerarPPT() {
           dataLabelFormatCode: '0',
           catAxisLabelFontSize: 7,
           catAxisLabelColor: '333333',
+          catAxisLabelFrequency: 1, // mostra todos os rótulos (notas/níveis), não só um sim um não
           valAxisHidden: true,
           valAxisMinVal: 0,
           barGapWidthPct: 20,
@@ -852,14 +866,14 @@ async function gerarPPT() {
           valGridLine: { style: 'none' },
         });
       } else {
-        s1.addText('Sem respostas ainda.', { x: 2.35, y: 1.4, w: 3.05, h: 0.5, fontSize: 10, color: GRAY, italic: true, fontFace: 'Arial', align: 'center' });
+        s1.addText('Sem respostas ainda.', { x: 2.35, y: 1.3, w: 3.05, h: 0.5, fontSize: 10, color: GRAY, italic: true, fontFace: 'Arial', align: 'center' });
       }
 
       if (!comentarios.length) return;
 
       // todas as respostas escritas, garantido para não ultrapassar o slide — usa quantos slides forem precisos
-      const boxPrimeira = { x: MARGEM_X, y: 2.25, w: LARGURA_CONTEUDO, h: 2.95 };
-      const boxDemais = { x: MARGEM_X, y: 1.05, w: LARGURA_CONTEUDO, h: 4.2 };
+      const boxPrimeira = { x: MARGEM_X, y: 2.15, w: LARGURA_CONTEUDO, h: RODAPE_Y - 2.15 };
+      const boxDemais = { x: MARGEM_X, y: 0.95, w: LARGURA_CONTEUDO, h: RODAPE_Y - 0.95 };
       paginarComentarios(comentarios, boxPrimeira, boxDemais, 10, (continuacao) => (continuacao ? novoSlide(true) : s1));
     });
 
