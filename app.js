@@ -726,7 +726,6 @@ async function gerarPPT() {
     await carregarPptxGenJS();
 
     const NAVY = '1B3260';
-    const GREEN = '2D8B5E';
     const GRAY = '6B7686';
     const CORCLIENTE = (relatorioSession.corMarca || '#E06C1F').replace('#', '').toUpperCase();
 
@@ -748,42 +747,72 @@ async function gerarPPT() {
       try { capa.addImage({ data: relatorioSession.logo, x: 8.3, y: 0.4, w: 1.2, h: 1.2 }); } catch (e) { /* ignora logo inválida */ }
     }
 
-    (relatorioSession.perguntas || []).forEach((p) => {
-      const s = pptx.addSlide();
-      s.background = { color: 'FFFFFF' };
-      // título com fonte menor para pergunta longa, e auto-ajuste caso ainda não caiba
-      const tituloFonte = p.texto.length > 110 ? 13 : p.texto.length > 75 ? 15 : p.texto.length > 45 ? 16 : 18;
-      s.addText(p.texto, {
+    // título (com numeração da pergunta e, se for continuação, aviso), com auto-ajuste se não couber
+    function adicionarTitulo(s, texto) {
+      const tituloFonte = texto.length > 110 ? 13 : texto.length > 75 ? 15 : texto.length > 45 ? 16 : 18;
+      s.addText(texto, {
         x: 0.5, y: 0.3, w: 9, h: 0.85, fontSize: tituloFonte, bold: true, color: NAVY, fontFace: 'Arial',
         valign: 'top', shrinkText: true,
       });
+    }
+
+    // todas as respostas, em 2 colunas, sem cortar o texto (PowerPoint reduz a fonte sozinho se precisar)
+    function adicionarComentarios(s, textos, { x, y, w, h, fontSize }) {
+      if (!textos.length) return;
+      const colW = (w - 0.2) / 2;
+      const metade = Math.ceil(textos.length / 2);
+      [textos.slice(0, metade), textos.slice(metade)].forEach((coluna, i) => {
+        if (!coluna.length) return;
+        const bullets = coluna.map((t) => ({ text: t, options: { bullet: true, color: '333333', breakLine: true, align: 'justify' } }));
+        s.addText(bullets, { x: x + i * (colW + 0.2), y, w: colW, h, fontSize, valign: 'top', fontFace: 'Arial', shrinkText: true });
+      });
+    }
+
+    function dividirEmPartes(lista, tamanho) {
+      const partes = [];
+      for (let i = 0; i < lista.length; i += tamanho) partes.push(lista.slice(i, i + tamanho));
+      return partes;
+    }
+
+    (relatorioSession.perguntas || []).forEach((p, idxPergunta) => {
+      const tituloBase = `${idxPergunta + 1}. ${p.texto}`;
+      const novoSlide = (continuacao) => {
+        const s = pptx.addSlide();
+        s.background = { color: 'FFFFFF' };
+        adicionarTitulo(s, continuacao ? `${tituloBase} (continuação)` : tituloBase);
+        return s;
+      };
 
       if (p.tipo === 'aberta') {
-        const comentariosAbertas = respondentes
-          .map((r) => ({ r, texto: r.abertas && r.abertas[p.id] }))
-          .filter((x) => x.texto)
-          .slice(0, 14);
-        if (!comentariosAbertas.length) {
-          s.addText('Sem respostas ainda.', { x: 0.5, y: 1.35, w: 9, h: 0.5, fontSize: 14, color: GRAY, italic: true, fontFace: 'Arial' });
-        } else {
-          const bullets = comentariosAbertas.map((x) => ({ text: cortar(x.texto, 220), options: { bullet: true, color: '333333', breakLine: true, align: 'justify' } }));
-          s.addText(bullets, { x: 0.5, y: 1.3, w: 9, h: 3.95, fontSize: 12, valign: 'top', fontFace: 'Arial', shrinkText: true });
+        const textos = respondentes.map((r) => r.abertas && r.abertas[p.id]).filter(Boolean);
+        if (!textos.length) {
+          novoSlide(false).addText('Sem respostas ainda.', { x: 0.5, y: 1.35, w: 9, h: 0.5, fontSize: 14, color: GRAY, italic: true, fontFace: 'Arial' });
+          return;
         }
+        dividirEmPartes(textos, 12).forEach((parte, i) => {
+          adicionarComentarios(novoSlide(i > 0), parte, { x: 0.5, y: 1.3, w: 9, h: 3.95, fontSize: 12 });
+        });
         return;
       }
 
-      const { valores, max, itens } = calcularDistribuicao(p, respondentes);
+      const { valores, itens } = calcularDistribuicao(p, respondentes);
       const media = valores.length ? valores.reduce((a, v) => a + v.valor, 0) / valores.length : null;
       const escalaLabel = p.tipo === 'nota10' ? '0 a 10' : '1 a 5';
+      const comentarios = respondentes
+        .map((r) => r.respostas && r.respostas[p.id])
+        .filter((v) => v && v.texto)
+        .map((v) => `"${v.texto}"`);
 
-      // média, à esquerda
-      s.addText(media === null ? '—' : formatarNumero(media), { x: 0.4, y: 1.55, w: 2.2, h: 1.0, fontSize: 40, bold: true, color: CORCLIENTE, fontFace: 'Arial' });
-      s.addText(`média de ${valores.length} resposta(s)\nescala ${escalaLabel}`, { x: 0.4, y: 2.55, w: 2.2, h: 0.7, fontSize: 10.5, color: GRAY, fontFace: 'Arial' });
+      const s1 = novoSlide(false);
 
-      // gráfico de barras com a quantidade de respostas por nível/nota, no centro
+      // média, compacta à esquerda
+      s1.addText(media === null ? '—' : formatarNumero(media), { x: 0.4, y: 1.2, w: 1.7, h: 0.9, fontSize: 34, bold: true, color: CORCLIENTE, fontFace: 'Arial' });
+      s1.addText(`média (${valores.length})\nescala ${escalaLabel}`, { x: 0.4, y: 2.05, w: 1.7, h: 0.55, fontSize: 9, color: GRAY, fontFace: 'Arial' });
+
+      // gráfico compacto, ao lado da média — dá mais espaço para os comentários abaixo
       if (valores.length && itens.some((it) => it.qtd > 0)) {
-        s.addChart(pptx.ChartType.bar, [{ name: 'Respostas', labels: itens.map((it) => it.label), values: itens.map((it) => it.qtd) }], {
-          x: 2.75, y: 1.15, w: 3.65, h: 4.05,
+        s1.addChart(pptx.ChartType.bar, [{ name: 'Respostas', labels: itens.map((it) => it.label), values: itens.map((it) => it.qtd) }], {
+          x: 2.15, y: 1.15, w: 4.35, h: 1.55,
           barDir: 'bar',
           chartColors: [CORCLIENTE],
           showLegend: false,
@@ -791,29 +820,28 @@ async function gerarPPT() {
           showValue: true,
           dataLabelPosition: 'outEnd',
           dataLabelColor: '333333',
-          dataLabelFontSize: 10,
+          dataLabelFontSize: 8,
           dataLabelFormatCode: '0',
-          catAxisLabelFontSize: p.tipo === 'nota10' ? 9 : 8.5,
+          catAxisLabelFontSize: p.tipo === 'nota10' ? 7.5 : 7,
           catAxisLabelColor: '333333',
           valAxisHidden: true,
           valAxisMinVal: 0,
-          barGapWidthPct: 35,
+          barGapWidthPct: 25,
           catGridLine: { style: 'none' },
           valGridLine: { style: 'none' },
         });
       } else {
-        s.addText('Sem respostas ainda.', { x: 2.75, y: 2.6, w: 3.65, h: 0.5, fontSize: 12, color: GRAY, italic: true, fontFace: 'Arial', align: 'center' });
+        s1.addText('Sem respostas ainda.', { x: 2.15, y: 1.7, w: 4.35, h: 0.5, fontSize: 11, color: GRAY, italic: true, fontFace: 'Arial', align: 'center' });
       }
 
-      // comentários, à direita
-      const comentarios = respondentes
-        .map((r) => ({ r, resp: r.respostas && r.respostas[p.id] }))
-        .filter((x) => x.resp && x.resp.texto)
-        .slice(0, 6);
-      if (comentarios.length) {
-        const bullets = comentarios.map((c) => ({ text: `"${cortar(c.resp.texto, 140)}"`, options: { bullet: true, color: '333333', breakLine: true, align: 'justify' } }));
-        s.addText(bullets, { x: 6.6, y: 1.15, w: 3.0, h: 4.05, fontSize: 10, valign: 'top', fontFace: 'Arial', shrinkText: true });
-      }
+      if (!comentarios.length) return;
+
+      // todas as respostas escritas, mesmo que precise de mais slides
+      const primeiroLote = comentarios.slice(0, 8);
+      adicionarComentarios(s1, primeiroLote, { x: 0.4, y: 2.85, w: 9.2, h: 2.55, fontSize: 10 });
+      dividirEmPartes(comentarios.slice(8), 16).forEach((parte) => {
+        adicionarComentarios(novoSlide(true), parte, { x: 0.4, y: 1.3, w: 9.2, h: 3.95, fontSize: 11 });
+      });
     });
 
     const nomeArquivo = `Relatorio-${(relatorioSession.clienteNome || 'clima').replace(/[^a-zA-Z0-9]+/g, '-')}.pptx`;
@@ -838,10 +866,6 @@ function calcularDistribuicao(p, respondentes) {
     itens.push({ label: p.tipo === 'nota10' ? String(i) : NIVEIS[p.tipo][i - 1], qtd: contagem[i] || 0 });
   }
   return { valores, max, itens };
-}
-
-function cortar(texto, tamanho) {
-  return texto.length > tamanho ? texto.slice(0, tamanho - 1).trimEnd() + '…' : texto;
 }
 
 function renderRelatorio() {
