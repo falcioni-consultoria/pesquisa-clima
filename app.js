@@ -839,14 +839,17 @@ async function gerarPPT() {
 
       const s1 = novoSlide(false);
 
-      // média, compacta à esquerda
-      s1.addText(media === null ? '—' : formatarNumero(media), { x: MARGEM_X, y: 0.88, w: 1.6, h: 0.75, fontSize: 30, bold: true, color: CORCLIENTE, fontFace: 'Arial' });
-      s1.addText(`média (${valores.length})\nescala ${escalaLabel}`, { x: MARGEM_X, y: 1.6, w: 1.6, h: 0.45, fontSize: 8.5, color: GRAY, fontFace: 'Arial' });
+      // média, numa linha só, compacta
+      s1.addText([
+        { text: media === null ? '—' : formatarNumero(media), options: { bold: true, fontSize: 20, color: CORCLIENTE } },
+        { text: `   média de ${valores.length} resposta(s)  ·  escala ${escalaLabel}`, options: { fontSize: 11, color: GRAY } },
+      ], { x: MARGEM_X, y: 0.82, w: LARGURA_CONTEUDO, h: 0.4, fontFace: 'Arial', valign: 'middle' });
 
-      // gráfico pequeno, ao lado da média — dá mais espaço para os comentários abaixo. Mostra todas as notas/níveis, não só alguns
+      // gráfico em largura total, no padrão do slide de resumo — mostra todas as notas/níveis, não só alguns
+      const CHART_Y = 1.28, CHART_H = 1.55;
       if (valores.length && itens.some((it) => it.qtd > 0)) {
         s1.addChart(pptx.ChartType.bar, [{ name: 'Respostas', labels: itens.map((it) => it.label), values: itens.map((it) => it.qtd) }], {
-          x: 2.35, y: 0.86, w: 3.05, h: 1.25,
+          x: MARGEM_X, y: CHART_Y, w: LARGURA_CONTEUDO, h: CHART_H,
           barDir: 'bar',
           chartColors: [CORCLIENTE],
           showLegend: false,
@@ -854,25 +857,26 @@ async function gerarPPT() {
           showValue: true,
           dataLabelPosition: 'outEnd',
           dataLabelColor: '333333',
-          dataLabelFontSize: 7.5,
+          dataLabelFontSize: 9,
           dataLabelFormatCode: '0',
-          catAxisLabelFontSize: 7,
+          catAxisLabelFontSize: 9,
           catAxisLabelColor: '333333',
           catAxisLabelFrequency: 1, // mostra todos os rótulos (notas/níveis), não só um sim um não
           valAxisHidden: true,
           valAxisMinVal: 0,
-          barGapWidthPct: 20,
+          barGapWidthPct: 30,
           catGridLine: { style: 'none' },
           valGridLine: { style: 'none' },
         });
       } else {
-        s1.addText('Sem respostas ainda.', { x: 2.35, y: 1.3, w: 3.05, h: 0.5, fontSize: 10, color: GRAY, italic: true, fontFace: 'Arial', align: 'center' });
+        s1.addText('Sem respostas ainda.', { x: MARGEM_X, y: CHART_Y + 0.4, w: LARGURA_CONTEUDO, h: 0.5, fontSize: 11, color: GRAY, italic: true, fontFace: 'Arial', align: 'center' });
       }
 
       if (!comentarios.length) return;
 
       // todas as respostas escritas, garantido para não ultrapassar o slide — usa quantos slides forem precisos
-      const boxPrimeira = { x: MARGEM_X, y: 2.15, w: LARGURA_CONTEUDO, h: RODAPE_Y - 2.15 };
+      const comentariosY = CHART_Y + CHART_H + 0.15;
+      const boxPrimeira = { x: MARGEM_X, y: comentariosY, w: LARGURA_CONTEUDO, h: RODAPE_Y - comentariosY };
       const boxDemais = { x: MARGEM_X, y: 0.95, w: LARGURA_CONTEUDO, h: RODAPE_Y - 0.95 };
       paginarComentarios(comentarios, boxPrimeira, boxDemais, 10, (continuacao) => (continuacao ? novoSlide(true) : s1));
     });
