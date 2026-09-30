@@ -188,7 +188,7 @@ function telaNova() {
   $('input-cliente').value = '';
   $('input-segmentos').value = SEGMENTOS_PADRAO.join(', ');
   $('input-forms').value = '';
-  $('input-cor').value = '#2D8B5E';
+  $('input-cor').value = '#E06C1F';
   logoDataUrl = null;
   $('logo-upload-preview').innerHTML = '🏢';
   $('btn-remover-logo').classList.add('hidden');
@@ -273,7 +273,7 @@ $('btn-criar-pesquisa').addEventListener('click', async () => {
   if (!perguntasValidas.length) { toast('Adicione ao menos uma pergunta.'); return; }
   const segmentos = $('input-segmentos').value.split(',').map((s) => s.trim()).filter(Boolean);
   const formsUrl = $('input-forms').value.trim();
-  const corMarca = $('input-cor').value || '#2D8B5E';
+  const corMarca = $('input-cor').value || '#E06C1F';
 
   const btn = $('btn-criar-pesquisa');
   btn.disabled = true; btn.textContent = 'Criando...';
@@ -674,7 +674,7 @@ async function telaRelatorio(sessionId) {
   }
 
   const inputCor = $('input-cor-relatorio');
-  inputCor.value = relatorioSession.corMarca || '#2D8B5E';
+  inputCor.value = relatorioSession.corMarca || '#E06C1F';
   inputCor.onchange = () => {
     relatorioSession.corMarca = inputCor.value;
     updateDoc(doc(db, 'sessions', sessionId), { corMarca: inputCor.value }).catch(falhaGravar);
@@ -728,7 +728,7 @@ async function gerarPPT() {
     const NAVY = '1B3260';
     const GREEN = '2D8B5E';
     const GRAY = '6B7686';
-    const CORCLIENTE = (relatorioSession.corMarca || '#' + GREEN).replace('#', '').toUpperCase();
+    const CORCLIENTE = (relatorioSession.corMarca || '#E06C1F').replace('#', '').toUpperCase();
 
     const filtro = $('filtro-segmento').value;
     const respondentes = respondentesFiltrados(filtro);
