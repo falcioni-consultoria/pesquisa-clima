@@ -740,7 +740,12 @@ async function gerarPPT() {
     (relatorioSession.perguntas || []).forEach((p) => {
       const s = pptx.addSlide();
       s.background = { color: 'FFFFFF' };
-      s.addText(p.texto, { x: 0.5, y: 0.35, w: 9, h: 0.9, fontSize: 18, bold: true, color: NAVY, fontFace: 'Arial' });
+      // título com fonte menor para pergunta longa, e auto-ajuste caso ainda não caiba
+      const tituloFonte = p.texto.length > 110 ? 13 : p.texto.length > 75 ? 15 : p.texto.length > 45 ? 16 : 18;
+      s.addText(p.texto, {
+        x: 0.5, y: 0.3, w: 9, h: 0.85, fontSize: tituloFonte, bold: true, color: NAVY, fontFace: 'Arial',
+        valign: 'top', shrinkText: true,
+      });
 
       if (p.tipo === 'aberta') {
         const comentariosAbertas = respondentes
@@ -748,29 +753,55 @@ async function gerarPPT() {
           .filter((x) => x.texto)
           .slice(0, 14);
         if (!comentariosAbertas.length) {
-          s.addText('Sem respostas ainda.', { x: 0.5, y: 1.4, w: 9, h: 0.5, fontSize: 14, color: GRAY, italic: true, fontFace: 'Arial' });
+          s.addText('Sem respostas ainda.', { x: 0.5, y: 1.35, w: 9, h: 0.5, fontSize: 14, color: GRAY, italic: true, fontFace: 'Arial' });
         } else {
-          const bullets = comentariosAbertas.map((x) => ({ text: x.texto, options: { bullet: true, color: '333333', breakLine: true } }));
-          s.addText(bullets, { x: 0.5, y: 1.35, w: 9, h: 3.9, fontSize: 12, valign: 'top', fontFace: 'Arial' });
+          const bullets = comentariosAbertas.map((x) => ({ text: cortar(x.texto, 220), options: { bullet: true, color: '333333', breakLine: true } }));
+          s.addText(bullets, { x: 0.5, y: 1.3, w: 9, h: 3.95, fontSize: 12, valign: 'top', fontFace: 'Arial', shrinkText: true });
         }
         return;
       }
 
-      const valores = respondentes.map((r) => r.respostas && r.respostas[p.id]).filter((v) => v && typeof v.valor === 'number');
+      const { valores, max, itens } = calcularDistribuicao(p, respondentes);
       const media = valores.length ? valores.reduce((a, v) => a + v.valor, 0) / valores.length : null;
-      const max = p.tipo === 'nota10' ? 10 : 5;
       const escalaLabel = p.tipo === 'nota10' ? '0 a 10' : '1 a 5';
 
-      s.addText(media === null ? '—' : formatarNumero(media), { x: 0.5, y: 1.3, w: 2.6, h: 1.1, fontSize: 44, bold: true, color: GREEN, fontFace: 'Arial' });
-      s.addText(`média de ${valores.length} resposta(s)\nescala ${escalaLabel}`, { x: 0.5, y: 2.35, w: 2.6, h: 0.7, fontSize: 11, color: GRAY, fontFace: 'Arial' });
+      // média, à esquerda
+      s.addText(media === null ? '—' : formatarNumero(media), { x: 0.4, y: 1.55, w: 2.2, h: 1.0, fontSize: 40, bold: true, color: GREEN, fontFace: 'Arial' });
+      s.addText(`média de ${valores.length} resposta(s)\nescala ${escalaLabel}`, { x: 0.4, y: 2.55, w: 2.2, h: 0.7, fontSize: 10.5, color: GRAY, fontFace: 'Arial' });
 
+      // gráfico de barras com a quantidade de respostas por nível/nota, no centro
+      if (valores.length && itens.some((it) => it.qtd > 0)) {
+        s.addChart(pptx.ChartType.bar, [{ name: 'Respostas', labels: itens.map((it) => it.label), values: itens.map((it) => it.qtd) }], {
+          x: 2.75, y: 1.15, w: 3.65, h: 4.05,
+          barDir: 'bar',
+          chartColors: [GREEN],
+          showLegend: false,
+          showTitle: false,
+          showValue: true,
+          dataLabelPosition: 'outEnd',
+          dataLabelColor: '333333',
+          dataLabelFontSize: 10,
+          dataLabelFormatCode: '0',
+          catAxisLabelFontSize: p.tipo === 'nota10' ? 9 : 8.5,
+          catAxisLabelColor: '333333',
+          valAxisHidden: true,
+          valAxisMinVal: 0,
+          barGapWidthPct: 35,
+          catGridLine: { style: 'none' },
+          valGridLine: { style: 'none' },
+        });
+      } else {
+        s.addText('Sem respostas ainda.', { x: 2.75, y: 2.6, w: 3.65, h: 0.5, fontSize: 12, color: GRAY, italic: true, fontFace: 'Arial', align: 'center' });
+      }
+
+      // comentários, à direita
       const comentarios = respondentes
         .map((r) => ({ r, resp: r.respostas && r.respostas[p.id] }))
         .filter((x) => x.resp && x.resp.texto)
-        .slice(0, 8);
+        .slice(0, 6);
       if (comentarios.length) {
-        const bullets = comentarios.map((c) => ({ text: `"${c.resp.texto}"`, options: { bullet: true, color: '333333', breakLine: true } }));
-        s.addText(bullets, { x: 3.3, y: 1.3, w: 6.2, h: 3.9, fontSize: 11, valign: 'top', fontFace: 'Arial' });
+        const bullets = comentarios.map((c) => ({ text: `"${cortar(c.resp.texto, 140)}"`, options: { bullet: true, color: '333333', breakLine: true } }));
+        s.addText(bullets, { x: 6.6, y: 1.15, w: 3.0, h: 4.05, fontSize: 10, valign: 'top', fontFace: 'Arial', shrinkText: true });
       }
     });
 
@@ -781,6 +812,25 @@ async function gerarPPT() {
   } finally {
     btn.disabled = false; btn.textContent = textoOriginal;
   }
+}
+
+// contagem de respostas por nível/nota, da maior para a menor (usado no relatório da tela e no PPT)
+function calcularDistribuicao(p, respondentes) {
+  const max = p.tipo === 'nota10' ? 10 : 5;
+  const inicio = p.tipo === 'nota10' ? 0 : 1;
+  const valores = respondentes.map((r) => r.respostas && r.respostas[p.id]).filter((v) => v && typeof v.valor === 'number');
+  const contagem = {};
+  for (let i = inicio; i <= max; i++) contagem[i] = 0;
+  valores.forEach((v) => { contagem[v.valor] = (contagem[v.valor] || 0) + 1; });
+  const itens = [];
+  for (let i = max; i >= inicio; i--) {
+    itens.push({ label: p.tipo === 'nota10' ? String(i) : NIVEIS[p.tipo][i - 1], qtd: contagem[i] || 0 });
+  }
+  return { valores, max, itens };
+}
+
+function cortar(texto, tamanho) {
+  return texto.length > tamanho ? texto.slice(0, tamanho - 1).trimEnd() + '…' : texto;
 }
 
 function renderRelatorio() {
@@ -824,11 +874,8 @@ function renderRelatorio() {
       return;
     }
 
-    const valores = respondentes
-      .map((r) => r.respostas && r.respostas[p.id])
-      .filter((v) => v && typeof v.valor === 'number');
+    const { valores, max, itens } = calcularDistribuicao(p, respondentes);
     const media = valores.length ? valores.reduce((a, v) => a + v.valor, 0) / valores.length : null;
-    const max = p.tipo === 'nota10' ? 10 : 5;
 
     card.innerHTML = `
       <div class="pergunta-relatorio-topo">
@@ -841,17 +888,11 @@ function renderRelatorio() {
     `;
 
     // distribuição
-    const contagem = {};
-    const inicio = p.tipo === 'nota10' ? 0 : 1;
-    for (let i = inicio; i <= max; i++) contagem[i] = 0;
-    valores.forEach((v) => { contagem[v.valor] = (contagem[v.valor] || 0) + 1; });
-    const maiorContagem = Math.max(1, ...Object.values(contagem));
+    const maiorContagem = Math.max(1, ...itens.map((it) => it.qtd));
 
     const distDiv = document.createElement('div');
     distDiv.className = 'dist-barras';
-    for (let i = max; i >= inicio; i--) {
-      const label = p.tipo === 'nota10' ? String(i) : NIVEIS[p.tipo][i - 1];
-      const qtd = contagem[i] || 0;
+    itens.forEach(({ label, qtd }) => {
       const linha = document.createElement('div');
       linha.className = 'dist-linha';
       linha.innerHTML = `
@@ -860,7 +901,7 @@ function renderRelatorio() {
         <span class="dist-count">${qtd}</span>
       `;
       distDiv.appendChild(linha);
-    }
+    });
     card.appendChild(distDiv);
 
     const comentarios = respondentes
