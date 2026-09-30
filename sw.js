@@ -1,4 +1,4 @@
-const CACHE = 'pesquisa-clima-v19';
+const CACHE = 'pesquisa-clima-v20';
 const ARQUIVOS = [
   './', './index.html', './style.css', './app.js', './questions.js', './importar.js', './vendor/xlsx.mini.min.js', './firebase-config.js', './manifest.json',
   './autocorrecao.js', './dicionario-pt.txt',
