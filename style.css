@@ -116,6 +116,7 @@ a.btn { text-decoration: none; display: inline-block; }
   font-family: inherit; background: #fff; color: var(--text);
 }
 .campo input:focus, .campo textarea:focus, .campo select:focus { outline: none; border-color: var(--green); }
+.campo-cor input[type="color"] { width: 64px; height: 38px; padding: 2px; border: 1px solid #cfd6e2; border-radius: 8px; cursor: pointer; background: #fff; }
 .campo-titulo { font-size: 13px; font-weight: 700; color: var(--navy); text-transform: uppercase; letter-spacing: .03em; }
 .campo-titulo-linha { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .logo-espaco {

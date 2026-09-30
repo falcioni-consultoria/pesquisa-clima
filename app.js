@@ -188,6 +188,7 @@ function telaNova() {
   $('input-cliente').value = '';
   $('input-segmentos').value = SEGMENTOS_PADRAO.join(', ');
   $('input-forms').value = '';
+  $('input-cor').value = '#2D8B5E';
   logoDataUrl = null;
   $('logo-upload-preview').innerHTML = '🏢';
   $('btn-remover-logo').classList.add('hidden');
@@ -272,12 +273,14 @@ $('btn-criar-pesquisa').addEventListener('click', async () => {
   if (!perguntasValidas.length) { toast('Adicione ao menos uma pergunta.'); return; }
   const segmentos = $('input-segmentos').value.split(',').map((s) => s.trim()).filter(Boolean);
   const formsUrl = $('input-forms').value.trim();
+  const corMarca = $('input-cor').value || '#2D8B5E';
 
   const btn = $('btn-criar-pesquisa');
   btn.disabled = true; btn.textContent = 'Criando...';
   const ref = doc(collection(db, 'sessions'));
   setDoc(ref, {
     clienteNome,
+    corMarca,
     status: 'aberta',
     perguntas: perguntasValidas,
     segmentos,
@@ -670,6 +673,13 @@ async function telaRelatorio(sessionId) {
     linkForms.classList.add('hidden');
   }
 
+  const inputCor = $('input-cor-relatorio');
+  inputCor.value = relatorioSession.corMarca || '#2D8B5E';
+  inputCor.onchange = () => {
+    relatorioSession.corMarca = inputCor.value;
+    updateDoc(doc(db, 'sessions', sessionId), { corMarca: inputCor.value }).catch(falhaGravar);
+  };
+
   const selFiltro = $('filtro-segmento');
   // lista de setores da pesquisa + qualquer setor que ainda apareça em respondentes (inclusive removidos da lista)
   const montarFiltro = () => {
@@ -718,6 +728,7 @@ async function gerarPPT() {
     const NAVY = '1B3260';
     const GREEN = '2D8B5E';
     const GRAY = '6B7686';
+    const CORCLIENTE = (relatorioSession.corMarca || '#' + GREEN).replace('#', '').toUpperCase();
 
     const filtro = $('filtro-segmento').value;
     const respondentes = respondentesFiltrados(filtro);
@@ -755,7 +766,7 @@ async function gerarPPT() {
         if (!comentariosAbertas.length) {
           s.addText('Sem respostas ainda.', { x: 0.5, y: 1.35, w: 9, h: 0.5, fontSize: 14, color: GRAY, italic: true, fontFace: 'Arial' });
         } else {
-          const bullets = comentariosAbertas.map((x) => ({ text: cortar(x.texto, 220), options: { bullet: true, color: '333333', breakLine: true } }));
+          const bullets = comentariosAbertas.map((x) => ({ text: cortar(x.texto, 220), options: { bullet: true, color: '333333', breakLine: true, align: 'justify' } }));
           s.addText(bullets, { x: 0.5, y: 1.3, w: 9, h: 3.95, fontSize: 12, valign: 'top', fontFace: 'Arial', shrinkText: true });
         }
         return;
@@ -766,7 +777,7 @@ async function gerarPPT() {
       const escalaLabel = p.tipo === 'nota10' ? '0 a 10' : '1 a 5';
 
       // média, à esquerda
-      s.addText(media === null ? '—' : formatarNumero(media), { x: 0.4, y: 1.55, w: 2.2, h: 1.0, fontSize: 40, bold: true, color: GREEN, fontFace: 'Arial' });
+      s.addText(media === null ? '—' : formatarNumero(media), { x: 0.4, y: 1.55, w: 2.2, h: 1.0, fontSize: 40, bold: true, color: CORCLIENTE, fontFace: 'Arial' });
       s.addText(`média de ${valores.length} resposta(s)\nescala ${escalaLabel}`, { x: 0.4, y: 2.55, w: 2.2, h: 0.7, fontSize: 10.5, color: GRAY, fontFace: 'Arial' });
 
       // gráfico de barras com a quantidade de respostas por nível/nota, no centro
@@ -774,7 +785,7 @@ async function gerarPPT() {
         s.addChart(pptx.ChartType.bar, [{ name: 'Respostas', labels: itens.map((it) => it.label), values: itens.map((it) => it.qtd) }], {
           x: 2.75, y: 1.15, w: 3.65, h: 4.05,
           barDir: 'bar',
-          chartColors: [GREEN],
+          chartColors: [CORCLIENTE],
           showLegend: false,
           showTitle: false,
           showValue: true,
@@ -800,7 +811,7 @@ async function gerarPPT() {
         .filter((x) => x.resp && x.resp.texto)
         .slice(0, 6);
       if (comentarios.length) {
-        const bullets = comentarios.map((c) => ({ text: `"${cortar(c.resp.texto, 140)}"`, options: { bullet: true, color: '333333', breakLine: true } }));
+        const bullets = comentarios.map((c) => ({ text: `"${cortar(c.resp.texto, 140)}"`, options: { bullet: true, color: '333333', breakLine: true, align: 'justify' } }));
         s.addText(bullets, { x: 6.6, y: 1.15, w: 3.0, h: 4.05, fontSize: 10, valign: 'top', fontFace: 'Arial', shrinkText: true });
       }
     });
